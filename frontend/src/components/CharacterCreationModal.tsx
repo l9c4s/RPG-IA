@@ -1,12 +1,11 @@
 import React, { useState } from 'react'
 import { Sword, Shield, User, ChevronRight, ChevronLeft, Check } from 'lucide-react'
 import { api } from '../api/client'
-import { campaignApi } from '../api/campaigns'
 import { Modal } from './ui/Modal'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
 import { Spinner } from './ui/Spinner'
-import type { Character, Generated8BitCharacter } from '../types'
+import type { Character } from '../types'
 import { RACES, CLASSES, ALIGNMENTS, STANDARD_ARRAY } from '../lib/constants'
 import { dndModifier, formatModifier } from '../lib/utils'
 
@@ -78,28 +77,12 @@ function StepIndicator({ current }: { current: WizardStep }): React.ReactElement
 
 // ─── Step 1: Basic Info ────────────────────────────────────────────────────
 interface Step1Props {
-  data:                   BasicInfo
-  onChange:               (data: BasicInfo) => void
-  onNext:                 () => void
-  simpleDescription:      string
-  onDescriptionChange:    (value: string) => void
-  onGenerate8Bit:         () => void
-  isGenerating8Bit:       boolean
-  generateError:          string | null
-  generated8Bit:          Generated8BitCharacter | null
+  data:     BasicInfo
+  onChange: (data: BasicInfo) => void
+  onNext:   () => void
 }
 
-function Step1({
-  data,
-  onChange,
-  onNext,
-  simpleDescription,
-  onDescriptionChange,
-  onGenerate8Bit,
-  isGenerating8Bit,
-  generateError,
-  generated8Bit,
-}: Step1Props): React.ReactElement {
+function Step1({ data, onChange, onNext }: Step1Props): React.ReactElement {
   const [error, setError] = useState<string | null>(null)
 
   function handleNext(): void {
@@ -172,68 +155,6 @@ function Step1({
           maxLength={60}
         />
       </div>
-
-      <div className="space-y-3">
-        <label className="label-rune">Descrição para 8-bit</label>
-        <textarea
-          value={simpleDescription}
-          onChange={(e) => onDescriptionChange(e.target.value)}
-          placeholder="Descreva em uma frase o seu herói em estilo 8-bit…"
-          className="input-dark resize-none h-24 w-full"
-          maxLength={220}
-        />
-        {generateError && (
-          <div className="text-red-300 text-sm bg-red-900/30 border border-red-700/40 rounded-md px-3 py-2">
-            {generateError}
-          </div>
-        )}
-        <div className="flex flex-col sm:flex-row gap-3">
-          <Button
-            variant="ghost"
-            onClick={onGenerate8Bit}
-            disabled={isGenerating8Bit || !simpleDescription.trim()}
-            leftIcon={isGenerating8Bit ? <Spinner size="sm" /> : undefined}
-          >
-            {isGenerating8Bit ? 'Gerando…' : 'Gerar personagem 8-bit'}
-          </Button>
-          <p className="text-slate-500 text-xs sm:flex-1">
-            Use LangChain para transformar esta descrição simples em um conceito de personagem em pixel art.
-          </p>
-        </div>
-      </div>
-
-      {generated8Bit && (
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4 space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-xs uppercase tracking-[0.2em] text-amber-400">Conceito 8-bit gerado</p>
-              <p className="text-slate-100 font-semibold">{generated8Bit.name}</p>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3 text-sm text-slate-300">
-            <div>
-              <p className="text-slate-500 text-[11px] uppercase tracking-[0.2em]">Classe</p>
-              <p>{generated8Bit.character_class}</p>
-            </div>
-            <div>
-              <p className="text-slate-500 text-[11px] uppercase tracking-[0.2em]">Raça</p>
-              <p>{generated8Bit.race}</p>
-            </div>
-            <div>
-              <p className="text-slate-500 text-[11px] uppercase tracking-[0.2em]">Alinhamento</p>
-              <p>{generated8Bit.alignment}</p>
-            </div>
-            <div>
-              <p className="text-slate-500 text-[11px] uppercase tracking-[0.2em]">Fundo</p>
-              <p>{generated8Bit.background}</p>
-            </div>
-          </div>
-          <div className="text-slate-300 text-sm">
-            <p className="font-semibold text-slate-100">Prompt 8-bit</p>
-            <p className="whitespace-pre-wrap break-words">{generated8Bit.pixel_art_prompt}</p>
-          </div>
-        </div>
-      )}
 
       <div className="flex justify-end pt-2">
         <Button
@@ -414,57 +335,19 @@ export default function CharacterCreationModal({
     flaws:              '',
   })
 
-  const [simpleDescription, setSimpleDescription] = useState('')
-  const [generated8Bit, setGenerated8Bit] = useState<Generated8BitCharacter | null>(null)
-  const [isGenerating8Bit, setIsGenerating8Bit] = useState(false)
-  const [generateError, setGenerateError] = useState<string | null>(null)
-
-  async function handleGenerate8Bit(): Promise<void> {
-    if (!simpleDescription.trim()) {
-      setGenerateError('Digite uma breve descrição para gerar o personagem 8-bit.')
-      return
-    }
-
-    setIsGenerating8Bit(true)
-    setGenerateError(null)
-
-    try {
-      const generated = await campaignApi.generate8BitCharacter(campaignId, simpleDescription)
-      setGenerated8Bit(generated)
-      setBasicInfo((current) => ({
-        ...current,
-        name:            generated.name ?? current.name,
-        race:            generated.race ?? current.race,
-        character_class: generated.character_class ?? current.character_class,
-        alignment:       generated.alignment ?? current.alignment,
-        background:      generated.background ?? current.background,
-      }))
-      setPersonality((current) => ({
-        ...current,
-        personality_traits: current.personality_traits || generated.backstory || '',
-      }))
-    } catch {
-      setGenerateError('Falha ao gerar o personagem 8-bit. Tente novamente.')
-    } finally {
-      setIsGenerating8Bit(false)
-    }
-  }
-
   async function handleCreate(): Promise<void> {
     setIsLoading(true)
     setError(null)
     try {
       const payload = {
-        campaign_id:      campaignId,
+        campaign_id:      Number(campaignId),
         name:             basicInfo.name,
         race:             basicInfo.race,
-        class:            basicInfo.character_class,
+        character_class:  basicInfo.character_class,
         background:       basicInfo.background,
         alignment:        basicInfo.alignment,
         level:            1,
         experience:       0,
-        appearance:       generated8Bit?.appearance,
-        backstory:        generated8Bit?.backstory,
         ability_scores:   abilityScores,
         personality_traits: personality.personality_traits,
         ideals:           personality.ideals,
@@ -513,12 +396,6 @@ export default function CharacterCreationModal({
           data={basicInfo}
           onChange={setBasicInfo}
           onNext={() => setStep(2)}
-          simpleDescription={simpleDescription}
-          onDescriptionChange={setSimpleDescription}
-          onGenerate8Bit={handleGenerate8Bit}
-          isGenerating8Bit={isGenerating8Bit}
-          generateError={generateError}
-          generated8Bit={generated8Bit}
         />
       )}
 

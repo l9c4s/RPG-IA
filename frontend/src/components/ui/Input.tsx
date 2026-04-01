@@ -43,8 +43,8 @@ export function Input({
           aria-describedby={descId}
           className={cn(
             'input-dark',
-            leftElement != null  && 'pl-9',
-            rightElement != null && 'pr-9',
+            leftElement  && 'pl-9',
+            rightElement && 'pr-9',
             error && 'border-red-600 focus:border-red-500',
             className,
           )}

@@ -661,10 +661,46 @@ export default function GameSession(): React.ReactElement {
                   </div>
                 </div>
               </div>
-              <div className="hp-bar-wrap" style={{ marginTop: 8 }}>
-                <div className="hp-label"><span style={{ fontWeight: 600 }}>Hit Points</span><span style={{ fontWeight: 700, color: 'var(--gold)' }}>{character?.status?.hp_current ?? 0} / {character?.status?.hp_max ?? 0}</span></div>
-                <div className="hp-bar" style={{ height: 10 }}><div className={`hp-fill ${character?.status?.hp_current && character?.status?.hp_max ? (character.status.hp_current / character.status.hp_max) > 0.5 ? 'hp-full' : (character.status.hp_current / character.status.hp_max) > 0.25 ? 'hp-mid' : 'hp-low' : 'hp-low'}`} style={{ width: `${character?.status?.hp_max ? Math.max(0, Math.min(100, (character.status.hp_current / character.status.hp_max) * 100)) : 0}%` }} /></div>
-              </div>
+            )}
+
+            <div ref={messagesEndRef} />
+          </div>
+
+          {/* Input area */}
+          <div className="border-t border-amber-700/20 bg-slate-900/90 p-3 shrink-0">
+            <div className="flex gap-2 items-end">
+              <textarea
+                ref={textareaRef}
+                value={inputText}
+                onChange={(e) => setInputText(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Describe your action… (Enter to send, Shift+Enter for new line)"
+                className="input-dark flex-1 resize-none min-h-[44px] max-h-32 leading-relaxed py-2.5"
+                rows={1}
+                disabled={isSending || connectionStatus !== 'connected'}
+                style={{ height: 'auto' }}
+                onInput={(e) => {
+                  const el = e.currentTarget
+                  el.style.height = 'auto'
+                  el.style.height = Math.min(el.scrollHeight, 128) + 'px'
+                }}
+              />
+              <button
+                onClick={() => void sendAction(inputText)}
+                disabled={
+                  !inputText.trim() ||
+                  isSending ||
+                  connectionStatus !== 'connected'
+                }
+                className="btn-primary px-3 py-2.5 shrink-0"
+                title="Send action (Enter)"
+              >
+                {isSending ? (
+                  <Spinner size="sm" />
+                ) : (
+                  <Send className="w-4 h-4" />
+                )}
+              </button>
             </div>
 
             <div className="stat-card">

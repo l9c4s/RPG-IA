@@ -23,17 +23,8 @@ export function formatModifier(score: number): string {
 /**
  * Format a date string or Date object to Brazilian locale (dd/mm/yyyy).
  */
-export function formatDate(date: string | Date | null | undefined): string {
-  if (date === null || date === undefined || date === '') {
-    return ''
-  }
-
-  const parsed = new Date(date)
-  if (Number.isNaN(parsed.getTime())) {
-    return ''
-  }
-
-  return parsed.toLocaleDateString('pt-BR', {
+export function formatDate(date: string | Date): string {
+  return new Date(date).toLocaleDateString('pt-BR', {
     day:   '2-digit',
     month: '2-digit',
     year:  'numeric',

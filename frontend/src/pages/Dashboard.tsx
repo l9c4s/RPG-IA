@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Sword, Plus, Book, Map, Users, Trash2,
+  Sword, Plus, Book, Map, Users,
   ChevronRight, AlertCircle, BookOpen, Clock,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { campaignApi } from '../api/campaigns'
 import { api } from '../api/client'
 import { useAuth } from '../hooks/useAuth'
 import { AppLayout } from '../components/layout/AppLayout'
@@ -20,7 +19,6 @@ import { RPG_SYSTEMS } from '../lib/constants'
 import { formatDate, truncate } from '../lib/utils'
 
 const STATUS_LABELS: Record<CampaignStatus, string> = {
-  lobby:     'Setup',
   active:    'Active',
   paused:    'Paused',
   completed: 'Completed',
@@ -28,7 +26,6 @@ const STATUS_LABELS: Record<CampaignStatus, string> = {
 }
 
 const STATUS_BADGE_VARIANT: Record<CampaignStatus, 'success' | 'warning' | 'info' | 'danger'> = {
-  lobby:     'warning',
   active:    'success',
   paused:    'warning',
   completed: 'info',
@@ -169,7 +166,7 @@ function CampaignCard({ campaign, onDelete, isDeleting }: CampaignCardProps): Re
       <div className="flex items-center gap-4 text-slate-500 text-xs mb-4">
         <span className="flex items-center gap-1">
           <Clock className="w-3 h-3" />
-          {formatDate(campaign.updated_at || campaign.created_at)}
+          {formatDate(campaign.updated_at)}
         </span>
         {campaign.session_count !== undefined && (
           <span className="flex items-center gap-1">
@@ -186,58 +183,32 @@ function CampaignCard({ campaign, onDelete, isDeleting }: CampaignCardProps): Re
       </div>
 
       <div className="flex gap-2">
-        {campaign.status === 'lobby' ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            leftIcon={<ChevronRight className="w-3.5 h-3.5" />}
-            onClick={() => navigate(`/lobby/${campaign.id}`)}
-            className="flex-1 justify-center border border-amber-700/40 hover:border-amber-600/60"
-          >
-            Continue Setup
-          </Button>
-        ) : (
-          <Button
-            variant="primary"
-            size="sm"
-            leftIcon={<Sword className="w-3.5 h-3.5" />}
-            onClick={() => navigate(`/campaign/${campaign.id}`)}
-            className="flex-1 justify-center"
-          >
-            Play
-          </Button>
-        )}
-        {campaign.status !== 'lobby' && (
-          <>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => navigate(`/campaign/${campaign.id}/characters`)}
-              className="px-3"
-              title="Characters"
-            >
-              <Users className="w-3.5 h-3.5" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => navigate(`/lobby/${campaign.id}`)}
-              className="px-3"
-              title="World Map"
-            >
-              <Map className="w-3.5 h-3.5" />
-            </Button>
-          </>
-        )}
         <Button
-          variant="danger"
+          variant="primary"
           size="sm"
-          onClick={() => onDelete(campaign.id)}
-          isLoading={isDeleting}
-          className="px-3"
-          title="Delete Campaign"
+          leftIcon={<Sword className="w-3.5 h-3.5" />}
+          onClick={() => navigate(`/campaign/${campaign.id}`)}
+          className="flex-1 justify-center"
         >
-          <Trash2 className="w-3.5 h-3.5" />
+          Play
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => navigate(`/campaign/${campaign.id}/characters`)}
+          className="px-3"
+          title="Characters"
+        >
+          <Users className="w-3.5 h-3.5" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => navigate(`/campaign/${campaign.id}/map`)}
+          className="px-3"
+          title="World Map"
+        >
+          <Map className="w-3.5 h-3.5" />
         </Button>
       </div>
     </div>
@@ -247,13 +218,11 @@ function CampaignCard({ campaign, onDelete, isDeleting }: CampaignCardProps): Re
 // ── Main Dashboard ─────────────────────────────────────────────────────────
 export default function Dashboard(): React.ReactElement {
   const { user }                           = useAuth()
-  const navigate                           = useNavigate()
   const [campaigns,    setCampaigns]       = useState<Campaign[]>([])
   const [isLoading,    setIsLoading]       = useState(true)
   const [error,        setError]           = useState<string | null>(null)
   const [showCreate,   setShowCreate]      = useState(false)
   const [filterStatus, setFilterStatus]    = useState<CampaignStatus | 'all'>('all')
-  const [deletingId,   setDeletingId]      = useState<number | null>(null)
 
   const fetchCampaigns = useCallback(async () => {
     setIsLoading(true)
@@ -384,12 +353,7 @@ export default function Dashboard(): React.ReactElement {
       {!isLoading && filtered.length > 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {filtered.map((campaign) => (
-            <CampaignCard
-              key={campaign.id}
-              campaign={campaign}
-              onDelete={handleDeleteCampaign}
-              isDeleting={deletingId === campaign.id}
-            />
+            <CampaignCard key={campaign.id} campaign={campaign} />
           ))}
         </div>
       )}

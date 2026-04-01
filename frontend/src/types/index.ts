@@ -34,15 +34,13 @@ export interface RegisterRequest {
 // ─────────────────────────────────────────────
 //  Campaigns
 // ─────────────────────────────────────────────
-export type CampaignStatus = 'lobby' | 'active' | 'paused' | 'completed' | 'archived'
+export type CampaignStatus = 'active' | 'paused' | 'completed' | 'archived'
 
 export interface Campaign {
   id: number
   title: string
   description: string
   rpg_system: string
-  difficulty?: string
-  tone?: string
   status: CampaignStatus
   owner_id: number
   created_at: string
@@ -57,17 +55,6 @@ export interface CreateCampaignRequest {
   title: string
   description: string
   rpg_system: string
-}
-
-export interface Generated8BitCharacter {
-  name?: string
-  race?: string
-  character_class?: string
-  alignment?: string
-  background?: string
-  appearance?: string
-  backstory?: string
-  pixel_art_prompt: string
 }
 
 // ─────────────────────────────────────────────
@@ -140,60 +127,49 @@ export interface CharacterAbility {
 }
 
 export type Condition =
-  | 'Blinded'    | 'Charmed'     | 'Deafened'     | 'Exhaustion'
+  | 'Blinded'    | 'Charmed'     | 'Deafened'    | 'Exhaustion'
   | 'Frightened' | 'Grappled'    | 'Incapacitated'| 'Invisible'
-  | 'Paralyzed'  | 'Petrified'   | 'Poisoned'     | 'Prone'
+  | 'Paralyzed'  | 'Petrified'   | 'Poisoned'    | 'Prone'
   | 'Restrained' | 'Stunned'     | 'Unconscious'
 
 export interface CharacterStatus {
-  hp_current:          number
-  hp_max:              number
-  hp_temp:             number
-  conditions:          Condition[]
-  spell_slots:         Record<string, number>
-  exhaustion:          number
-  death_saves_success: number
-  death_saves_failure: number
-}
-
-export interface CharacterAttributes {
-  strength:     number
-  dexterity:    number
-  constitution: number
-  intelligence: number
-  wisdom:       number
-  charisma:     number
-  armor_class:  number
-  initiative:   number
-  speed:        number
+  hp_current:    number
+  hp_max:        number
+  hp_temp:       number
+  ac:            number
+  speed:         number
+  initiative:    number
+  death_saves_successes: number
+  death_saves_failures:  number
+  conditions:    Condition[]
+  exhaustion_level: number
 }
 
 export interface Character {
-  id:              string
-  campaign_id?:    string
-  player_id?:      string
-  name:            string
-  race:            string
-  subrace?:        string
+  id:            number
+  campaign_id:   number
+  player_id:     number
+  name:          string
+  race:          string
+  subrace?:      string
   character_class: string
-  subclass?:       string
-  level:           number
-  proficiency_bonus: number
-  alignment?:      string
-  background?:     string
-  personality_traits?: string
-  ideals?:         string
-  bonds?:          string
-  flaws?:          string
-  backstory?:      string
-  appearance?:     string
-  char_type:       string
-  notes?:          string
-  is_alive:        boolean
-  status?:         CharacterStatus
-  attributes?:     CharacterAttributes
+  subclass?:     string
+  level:         number
+  experience:    number
+  alignment:     Alignment
+  background:    string
+  personality_traits: string
+  ideals:        string
+  bonds:         string
+  flaws:         string
+  ability_scores:  AbilityScores
+  saving_throws:   SavingThrows
+  skills:          Skills
+  spell_slots:     SpellSlots[]
   inventory:       InventoryItem[]
   abilities:       CharacterAbility[]
+  status:          CharacterStatus
+  notes:           string
   created_at:      string
   updated_at:      string
 }
@@ -211,8 +187,8 @@ export type ActionType =
   | 'item_use'
 
 export interface PlayerAction {
-  session_id:    string
-  character_id?: string
+  session_id:    number
+  character_id:  number
   action_type:   ActionType
   content:       string
   timestamp:     string
