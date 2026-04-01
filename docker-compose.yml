@@ -55,7 +55,10 @@ services:
   # ─── Services ─────────────────────────────────────────────────────────────
   gateway:
     build: ./services/gateway
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     env_file: .env
+    volumes:
+      - ./services/gateway:/app
     ports:
       - "8000:8000"
     depends_on:
@@ -67,7 +70,10 @@ services:
 
   pdf_service:
     build: ./services/pdf_ingestion
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8001", "--reload"]
     env_file: .env
+    volumes:
+      - ./services/pdf_ingestion:/app
     ports:
       - "8001:8001"
     depends_on:
@@ -83,6 +89,8 @@ services:
     build: ./services/pdf_ingestion
     command: celery -A worker.celery_app worker --loglevel=info -Q pdf_processing
     env_file: .env
+    volumes:
+      - ./services/pdf_ingestion:/app
     depends_on:
       postgres:
         condition: service_healthy
@@ -96,6 +104,8 @@ services:
     build: ./services/pdf_ingestion
     command: celery -A worker.celery_app flower --port=5555
     env_file: .env
+    volumes:
+      - ./services/pdf_ingestion:/app
     ports:
       - "5555:5555"
     depends_on:
@@ -104,7 +114,10 @@ services:
 
   campaign_service:
     build: ./services/campaign
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8002", "--reload"]
     env_file: .env
+    volumes:
+      - ./services/campaign:/app
     ports:
       - "8002:8002"
     depends_on:
@@ -116,7 +129,10 @@ services:
 
   character_service:
     build: ./services/character
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8003", "--reload"]
     env_file: .env
+    volumes:
+      - ./services/character:/app
     ports:
       - "8003:8003"
     depends_on:
@@ -126,7 +142,10 @@ services:
 
   image_service:
     build: ./services/image_gen
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8004", "--reload"]
     env_file: .env
+    volumes:
+      - ./services/image_gen:/app
     ports:
       - "8004:8004"
     depends_on:
@@ -136,7 +155,10 @@ services:
 
   tts_service:
     build: ./services/tts
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8005", "--reload"]
     env_file: .env
+    volumes:
+      - ./services/tts:/app
     ports:
       - "8005:8005"
     depends_on:
@@ -145,8 +167,6 @@ services:
 
   frontend:
     build: ./frontend
-    ports:
-      - "3000:80"
     depends_on:
       - gateway
     restart: unless-stopped

@@ -33,9 +33,28 @@ class CampaignCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=200)
     description: Optional[str] = Field(default=None, max_length=2000)
     rpg_system: str = Field(..., min_length=1, max_length=100)
-    difficulty: str = Field(default="medium", pattern="^(easy|medium|hard|deadly)$")
+    difficulty: str = Field(default="medium", pattern="^(easy|medium|hard)$")
     tone: str = Field(default="heroic", max_length=100)
+
+
+class CampaignStatusUpdate(BaseModel):
+    status: str = Field(..., pattern="^(lobby|active|paused|completed|archived)$")
 
 
 class SessionCreate(BaseModel):
     campaign_id: UUID
+
+
+class MapLocation(BaseModel):
+    id: str
+    name: str
+    description: str
+    x: float
+    y: float
+    type: str
+    is_current: bool = False
+    discovered: bool = False
+
+
+class GenerateMapResponse(BaseModel):
+    locations: list[MapLocation]

@@ -168,7 +168,8 @@ async def create_character(payload: CharacterCreate, db: DBSession) -> Character
     await db.flush()  # persist to get ID before inserting children
 
     status_row = _init_status(character.id)
-    attrs_row = _init_attributes(character.id)
+    attrs_data = payload.attributes.model_dump() if payload.attributes else {}
+    attrs_row = CharacterAttributesDB(id=uuid4(), character_id=character.id, **attrs_data)
     db.add(status_row)
     db.add(attrs_row)
 
@@ -219,6 +220,7 @@ async def update_character(
         setattr(character, field, value)
 
     await db.flush()
+    await db.refresh(character)
     return CharacterOut.model_validate(character)
 
 
@@ -250,22 +252,29 @@ async def delete_character(
 
 @app.get(
     "/campaigns/{campaign_id}/characters",
-    response_model=list[CharacterOut],
+    response_model=list[CharacterFull],
     summary="Listar personagens de uma campanha",
 )
 async def list_campaign_characters(
     campaign_id: Annotated[UUID, Path(description="ID da campanha")],
     db: DBSession,
-) -> list[CharacterOut]:
-    """Retorna todos os personagens ativos vinculados a uma campanha."""
+) -> list[CharacterFull]:
+    """Retorna todos os personagens ativos vinculados a uma campanha (com status e atributos)."""
     result = await db.execute(
-        select(CharacterDB).where(
+        select(CharacterDB)
+        .options(
+            selectinload(CharacterDB.status),
+            selectinload(CharacterDB.attributes),
+            selectinload(CharacterDB.inventory),
+            selectinload(CharacterDB.abilities),
+        )
+        .where(
             CharacterDB.campaign_id == campaign_id,
             CharacterDB.is_alive == True,  # noqa: E712
         )
     )
     characters = result.scalars().all()
-    return [CharacterOut.model_validate(c) for c in characters]
+    return [CharacterFull.model_validate(c) for c in characters]
 
 
 # ---------------------------------------------------------------------------
@@ -302,6 +311,9 @@ async def update_character_status(
         setattr(st, field, value)
 
     await db.flush()
+    await db.refresh(character)
+    if character.status:
+        await db.refresh(character.status)
     return CharacterFull.model_validate(character)
 
 

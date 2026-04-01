@@ -140,6 +140,7 @@ CREATE TABLE IF NOT EXISTS characters (
     class       TEXT,
     subclass    TEXT,
     level       INTEGER DEFAULT 1,
+    proficiency_bonus INTEGER DEFAULT 2,
     background  TEXT,
     alignment   TEXT,
     char_type   TEXT DEFAULT 'pc',    -- pc, npc, ai_companion

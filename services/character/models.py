@@ -22,6 +22,18 @@ def calc_proficiency_bonus(level: int) -> int:
 # ---------------------------------------------------------------------------
 
 
+class AttributesCreate(BaseModel):
+    strength: int = Field(default=10, ge=1, le=30)
+    dexterity: int = Field(default=10, ge=1, le=30)
+    constitution: int = Field(default=10, ge=1, le=30)
+    intelligence: int = Field(default=10, ge=1, le=30)
+    wisdom: int = Field(default=10, ge=1, le=30)
+    charisma: int = Field(default=10, ge=1, le=30)
+    armor_class: int = Field(default=10, ge=0)
+    initiative: int = Field(default=0)
+    speed: int = Field(default=30, ge=0)
+
+
 class CharacterCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     race: str = Field(..., min_length=1, max_length=100)
@@ -32,12 +44,13 @@ class CharacterCreate(BaseModel):
     alignment: Optional[str] = Field(default=None, max_length=50)
     char_type: str = Field(
         default="player",
-        pattern=r"^(player|npc|monster)$",
+        pattern=r"^(player|npc|ai_companion)$",
     )
     backstory: Optional[str] = Field(default=None, max_length=5000)
     appearance: Optional[str] = Field(default=None, max_length=2000)
     campaign_id: Optional[UUID] = None
     owner_id: Optional[UUID] = None
+    attributes: Optional[AttributesCreate] = None
 
     model_config = {"populate_by_name": True}
 
@@ -52,7 +65,7 @@ class CharacterUpdate(BaseModel):
     background: Optional[str] = Field(default=None, max_length=200)
     alignment: Optional[str] = Field(default=None, max_length=50)
     char_type: Optional[str] = Field(
-        default=None, pattern=r"^(player|npc|monster)$"
+        default=None, pattern=r"^(player|npc|ai_companion)$"
     )
     backstory: Optional[str] = Field(default=None, max_length=5000)
     appearance: Optional[str] = Field(default=None, max_length=2000)
@@ -210,7 +223,7 @@ class CharacterOut(BaseModel):
     id: UUID
     name: str
     race: str
-    class_: str = Field(alias="class_", serialization_alias="class")
+    class_: str = Field(alias="class_", serialization_alias="character_class")
     subclass: Optional[str]
     level: int
     proficiency_bonus: int
@@ -234,7 +247,7 @@ class CharacterFull(BaseModel):
     id: UUID
     name: str
     race: str
-    class_: str = Field(alias="class_", serialization_alias="class")
+    class_: str = Field(alias="class_", serialization_alias="character_class")
     subclass: Optional[str]
     level: int
     proficiency_bonus: int

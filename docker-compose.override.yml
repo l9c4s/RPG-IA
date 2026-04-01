@@ -1,0 +1,27 @@
+# Desenvolvimento — sobrescreve o frontend para usar Vite dev server com hot reload.
+# Aplicado automaticamente pelo Docker Compose ao rodar `docker compose up`.
+# Para produção (sem hot reload), use: docker compose -f docker-compose.yml up
+
+services:
+  frontend:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm install --prefer-offline --silent && npm run dev"
+    volumes:
+      - ./frontend:/app
+      - frontend_nm:/app/node_modules   # volume separado para não sobrescrever node_modules do host
+    environment:
+      - VITE_API_HOST=gateway
+      - VITE_WS_HOST=campaign_service
+      - VITE_CAMPAIGN_HOST=campaign_service
+      - VITE_CHARACTER_HOST=character_service
+      - VITE_PDF_HOST=pdf_service
+    ports:
+      - "3000:3000"
+    depends_on:
+      - gateway
+      - campaign_service
+    restart: unless-stopped
+
+volumes:
+  frontend_nm:

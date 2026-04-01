@@ -89,13 +89,56 @@ imagens via DALL·E 3 e banco global de embeddings alimentado por PDFs enviados 
 │
 └── frontend/
     ├── src/
-    │   ├── components/
-    │   │   ├── KnowledgeGate.tsx   # Upload PDF + GM intelligence level
-    │   │   ├── GameSession.tsx     # Chat principal com o GM
-    │   │   ├── CharacterSheet.tsx  # Ficha D&D
-    │   │   └── WorldMap.tsx        # Mapa SVG interativo
+    │   ├── types/
+    │   │   └── index.ts            # Todos os 30+ tipos TypeScript centralizados
+    │   ├── lib/
+    │   │   ├── constants.ts        # RPG_SYSTEMS, RACES, CLASSES, SKILLS, CONDITIONS, etc.
+    │   │   └── utils.ts            # cn(), dndModifier(), formatModifier(), formatDate()
+    │   ├── contexts/
+    │   │   └── AuthContext.tsx     # AuthProvider global + useAuthContext()
+    │   ├── api/
+    │   │   ├── client.ts           # Instâncias axios (apiClient, apiClientMultipart)
+    │   │   ├── auth.ts             # authApi { login, register, me }
+    │   │   ├── campaigns.ts        # campaignApi { list, get, create, delete, ... }
+    │   │   ├── characters.ts       # characterApi { list, get, create, update, ... }
+    │   │   ├── knowledge.ts        # knowledgeApi { getStats, listSources, upload, ... }
+    │   │   ├── session.ts          # sessionApi { getOrCreate, getHistory, sendAction }
+    │   │   ├── types.ts            # Re-export de ../types (retrocompatibilidade)
+    │   │   └── index.ts            # Re-export de todos os módulos de API
     │   ├── hooks/
-    │   └── App.tsx
+    │   │   ├── useAuth.ts          # Wrapper fino sobre useAuthContext()
+    │   │   ├── useWebSocket.ts     # Conexão WS com auto-reconnect (5 tentativas, ping 25s)
+    │   │   └── useLocalStorage.ts  # Hook genérico tipado com sync cross-tab
+    │   ├── components/
+    │   │   ├── ui/                 # Primitivos reutilizáveis
+    │   │   │   ├── Button.tsx      # variant, size, isLoading, leftIcon, rightIcon
+    │   │   │   ├── Input.tsx       # label, error, helperText, ARIA completo
+    │   │   │   ├── Modal.tsx       # portal, focus trap, ESC/click-outside fecha
+    │   │   │   ├── Badge.tsx       # 6 variantes (default/success/warning/danger/info/condition)
+    │   │   │   ├── Spinner.tsx     # SVG animado, 3 tamanhos
+    │   │   │   ├── Skeleton.tsx    # + SkeletonCard, SkeletonTable
+    │   │   │   └── index.ts        # Re-export de todos os primitivos
+    │   │   ├── layout/
+    │   │   │   ├── AppLayout.tsx   # Navbar reutilizável (brand, links, logout)
+    │   │   │   └── AuthLayout.tsx  # Layout centralizado para login/register
+    │   │   ├── ErrorBoundary.tsx   # Class component — captura erros de render
+    │   │   ├── CharacterCreationModal.tsx  # Wizard 3 passos (usa Modal + Button + Input)
+    │   │   ├── CharacterSheet.tsx  # Ficha D&D completa (usa Spinner + Badge)
+    │   │   ├── GameSession.tsx     # Chat WebSocket em tempo real
+    │   │   ├── KnowledgeGate.tsx   # Upload PDF + gestão de fontes
+    │   │   └── WorldMap.tsx        # Mapa SVG interativo
+    │   ├── pages/
+    │   │   ├── Login.tsx           # Usa AuthLayout + Input + Button
+    │   │   ├── Register.tsx        # Usa AuthLayout + Input + Button
+    │   │   ├── Dashboard.tsx       # Usa AppLayout + Button + Badge + Modal + Skeleton
+    │   │   └── Lobby.tsx           # Usa AppLayout + Button + Badge + Spinner
+    │   ├── __tests__/
+    │   │   ├── setup.ts
+    │   │   ├── useAuth.test.ts
+    │   │   └── useWebSocket.test.ts
+    │   ├── App.tsx                 # Wrapped em ErrorBoundary + AuthProvider
+    │   ├── main.tsx
+    │   └── index.css               # Tailwind directives + tema dark fantasy
     └── Dockerfile
 ```
 
@@ -324,6 +367,46 @@ bash deploy.sh
 # Mapas: "top-down view, hand-drawn parchment map style, aged paper texture"
 # Salvar em MinIO e retornar URL relativa /media/images/...
 ```
+
+### Frontend (React + TypeScript)
+```typescript
+// Tipos: sempre importar de src/types (nunca de api/types diretamente)
+// Constantes RPG: sempre importar de src/lib/constants (RPG_SYSTEMS, RACES, etc.)
+// Utilitários: cn() para classes, dndModifier() para modificadores D&D
+// Auth: sempre via useAuth() (wrapper de AuthContext) — nunca acessar localStorage direto
+// API: usar módulos de domínio (campaignApi, characterApi, etc.) — nunca apiClient direto
+// Componentes UI: sempre usar primitivos de src/components/ui antes de criar novos
+// Layouts: AppLayout para páginas autenticadas, AuthLayout para login/register
+// Erros de render: ErrorBoundary já está no root — não duplicar
+// Lazy loading: todas as páginas são lazy-loaded via React.lazy() em App.tsx
+// Sem dependências novas sem aprovação — usar apenas o que está no package.json
+```
+
+---
+
+## Skills disponíveis
+
+Skills são conjuntos de regras especializadas invocáveis pelo Claude Code via `/skill-name`.
+Ficam em `.agents/skills/` e são carregadas automaticamente quando relevantes.
+
+### `vercel-react-best-practices`
+**Quando usar:** ao escrever, revisar ou refatorar componentes React/TypeScript deste projeto.
+
+68 regras de performance organizadas por prioridade:
+
+| Prioridade | Categoria | Prefixo | Exemplos |
+|---|---|---|---|
+| 1 — CRÍTICO | Eliminar waterfalls | `async-` | Promise.all para operações independentes |
+| 2 — CRÍTICO | Bundle size | `bundle-` | Import direto (sem barrel), dynamic imports |
+| 3 — ALTO | Performance server | `server-` | React.cache(), paralelizar fetches |
+| 4 — MÉDIO-ALTO | Data fetching client | `client-` | Deduplicar listeners, versionar localStorage |
+| 5 — MÉDIO | Otimizar re-renders | `rerender-` | memo, useRef para valores transientes |
+| 6 — MÉDIO | Rendering | `rendering-` | Suspense, content-visibility, JSX estático |
+| 7 — BAIXO-MÉDIO | JS performance | `js-` | Map/Set O(1), early exit, RegExp hoistado |
+| 8 — BAIXO | Padrões avançados | `advanced-` | useLatest, init-once, event handler refs |
+
+Regras individuais em `.agents/skills/vercel-react-best-practices/rules/`.
+Guia completo compilado em `.agents/skills/vercel-react-best-practices/AGENTS.md`.
 
 ---
 

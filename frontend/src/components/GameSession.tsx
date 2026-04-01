@@ -1,19 +1,21 @@
 import React, {
   useState, useEffect, useRef, useCallback, KeyboardEvent
 } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useNavigate } from 'react-router-dom'
 import {
-  Send, Wifi, WifiOff, Loader2, AlertTriangle, Users,
+  Send, Wifi, WifiOff, AlertTriangle, Users,
   Map, BookOpen, ChevronLeft, Dice1, Dice6, Volume2,
   Image as ImageIcon, Heart, Shield, Zap, X
 } from 'lucide-react'
 import { api } from '../api/client'
 import { useAuth } from '../hooks/useAuth'
 import { useWebSocket } from '../hooks/useWebSocket'
+import { Spinner } from './ui/Spinner'
+import { Badge } from './ui/Badge'
 import type {
   ChatMessage, Character, CharacterStatus, WSMessage,
   GMResponse, PlayerAction, DiceRoll, StateUpdate, Campaign
-} from '../api/types'
+} from '../types'
 import WorldMap from './WorldMap'
 
 // ─── Connection indicator ──────────────────────────────────────────────────
@@ -36,7 +38,7 @@ function ConnectionBadge({ status }: { status: ConnStatus }): React.ReactElement
       ) : status === 'error' || status === 'disconnected' ? (
         <WifiOff className="w-3.5 h-3.5" />
       ) : (
-        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+        <Spinner size="sm" />
       )}
       <span className={cfg.pulse ? 'animate-pulse' : ''}>{cfg.label}</span>
     </div>
@@ -176,9 +178,12 @@ interface CharStatusPanelProps {
 }
 
 function CharStatusPanel({ character, onExpand }: CharStatusPanelProps): React.ReactElement {
-  const { status } = character
-  const hpPercent  = Math.max(0, Math.min(100, (status.hp_current / status.hp_max) * 100))
-  const hpColor    = hpPercent > 50 ? 'bg-green-600' : hpPercent > 25 ? 'bg-amber-500' : 'bg-red-600'
+  const status  = character.status
+  const attrs   = character.attributes
+  const hpMax   = status?.hp_max ?? 1
+  const hpCur   = status?.hp_current ?? 0
+  const hpPercent = Math.max(0, Math.min(100, (hpCur / hpMax) * 100))
+  const hpColor   = hpPercent > 50 ? 'bg-green-600' : hpPercent > 25 ? 'bg-amber-500' : 'bg-red-600'
 
   return (
     <div className="card-rune p-4 space-y-3">
@@ -205,7 +210,7 @@ function CharStatusPanel({ character, onExpand }: CharStatusPanelProps): React.R
             <Heart className="w-3 h-3 text-red-500" /> HP
           </span>
           <span className="text-slate-300">
-            {status.hp_current}{status.hp_temp > 0 && <span className="text-blue-400">+{status.hp_temp}</span>} / {status.hp_max}
+            {hpCur}{(status?.hp_temp ?? 0) > 0 && <span className="text-blue-400">+{status?.hp_temp}</span>} / {hpMax}
           </span>
         </div>
         <div className="hp-track">
@@ -219,17 +224,17 @@ function CharStatusPanel({ character, onExpand }: CharStatusPanelProps): React.R
       {/* AC + Speed */}
       <div className="flex items-center gap-3 text-xs">
         <span className="flex items-center gap-1 text-slate-400">
-          <Shield className="w-3 h-3 text-blue-400" /> AC {status.ac}
+          <Shield className="w-3 h-3 text-blue-400" /> AC {attrs?.armor_class ?? 10}
         </span>
         <span className="flex items-center gap-1 text-slate-400">
-          <Zap className="w-3 h-3 text-amber-400" /> {status.speed} ft
+          <Zap className="w-3 h-3 text-amber-400" /> {attrs?.speed ?? 30} ft
         </span>
       </div>
 
       {/* Conditions */}
-      {status.conditions.length > 0 && (
+      {(status?.conditions ?? []).length > 0 && (
         <div className="flex flex-wrap gap-1">
-          {status.conditions.map((c) => (
+          {(status?.conditions ?? []).map((c) => (
             <span key={c} className="badge-condition">{c}</span>
           ))}
         </div>
@@ -242,12 +247,16 @@ function CharStatusPanel({ character, onExpand }: CharStatusPanelProps): React.R
 export default function GameSession(): React.ReactElement {
   const { id: campaignId } = useParams<{ id: string }>()
   const { user }           = useAuth()
+  const navigate           = useNavigate()
 
   const [campaign,        setCampaign]        = useState<Campaign | null>(null)
   const [character,       setCharacter]       = useState<Character | null>(null)
-  const [sessionId,       setSessionId]       = useState<number | null>(null)
+  const [party,           setParty]           = useState<Character[]>([])
+  const [sessionId,       setSessionId]       = useState<string | null>(null)
   const [messages,        setMessages]        = useState<ChatMessage[]>([])
   const [inputText,       setInputText]       = useState('')
+  const [activeTab,       setActiveTab]       = useState<'chat' | 'sheet' | 'map'>('chat')
+  const [voiceActive,     setVoiceActive]     = useState(false)
   const [isSending,       setIsSending]       = useState(false)
   const [isLoading,       setIsLoading]       = useState(true)
   const [gateBlocked,     setGateBlocked]     = useState(false)
@@ -321,22 +330,30 @@ export default function GameSession(): React.ReactElement {
     const loadSession = async () => {
       setIsLoading(true)
       try {
-        const [campaignData, sessionData] = await Promise.all([
-          api.get<Campaign>(`/campaigns/${campaignId}`),
-          api.post<{ id: number; history: ChatMessage[] }>(
-            `/campaigns/${campaignId}/sessions/start`,
-          ),
-        ])
+        // Check campaign first to validate it's ready to play
+        const campaignData = await api.get<Campaign>(`/campaigns/${campaignId}`)
         setCampaign(campaignData)
+
+        if (campaignData.status !== 'active') {
+          // Campaign not ready — redirect to setup lobby
+          navigate(`/lobby/${campaignId}`, { replace: true })
+          return
+        }
+
+        const sessionData = await api.post<{ id: string; history: ChatMessage[] }>(
+          `/campaigns/${campaignId}/sessions/start`,
+        )
         setSessionId(sessionData.id)
         setMessages(sessionData.history ?? [])
 
         // Load character
         try {
           const chars = await api.get<Character[]>(
-            `/campaigns/${campaignId}/characters?player_id=${user.id}`,
+            `/campaigns/${campaignId}/characters`,
           )
-          if (chars.length > 0) setCharacter(chars[0])
+          setParty(chars)
+          const myChar = chars.find((c) => c.player_id === String(user.id)) ?? chars[0]
+          if (myChar) setCharacter(myChar)
         } catch {
           // No character yet — that's OK
         }
@@ -347,7 +364,7 @@ export default function GameSession(): React.ReactElement {
           {
             id:        crypto.randomUUID(),
             role:      'system',
-            content:   'Failed to connect to the session. Please refresh.',
+            content:   'Falha ao conectar à sessão. Atualize a página.',
             timestamp: new Date().toISOString(),
           },
         ])
@@ -417,12 +434,39 @@ export default function GameSession(): React.ReactElement {
     }
   }
 
+  const toggleVoice = (): void => {
+    setVoiceActive((current) => !current)
+  }
+
+  const difficultyLabel = campaign?.difficulty
+    ? campaign.difficulty.charAt(0).toUpperCase() + campaign.difficulty.slice(1)
+    : 'Normal'
+
+  const sessionInfoText = campaign?.session_count
+    ? `Sessão ${campaign.session_count} · ${campaign.status === 'active' ? 'Medium Campaign' : campaign.status}`
+    : 'Sessão 1 · Campanha Active'
+
+  const openSettings = (): void => {
+    const result = window.prompt('Campaign settings (set difficulty: easy, normal, hard, hardcore)', 'difficulty:hard')
+    if (!result) return
+    const [, value] = result.split(':')
+    const difficulty = value?.trim().toLowerCase()
+    if (difficulty && ['easy', 'normal', 'hard', 'hardcore'].includes(difficulty)) {
+      setCampaign((prev) => prev ? { ...prev, difficulty } : prev)
+    }
+  }
+
+  const quickAction = (text: string): void => {
+    setInputText(text)
+    void sendAction(text)
+  }
+
   // ── Render ────────────────────────────────────────────────────────────────
   if (isLoading) {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
-          <Loader2 className="w-10 h-10 text-amber-600 animate-spin" />
+          <Spinner size="lg" />
           <p className="text-amber-500 font-serif italic animate-pulse">
             The dungeon master prepares the scene…
           </p>
@@ -432,172 +476,250 @@ export default function GameSession(): React.ReactElement {
   }
 
   return (
-    <div className="h-screen bg-slate-900 flex flex-col overflow-hidden">
-      {/* ── Header ── */}
-      <header className="bg-slate-900/95 backdrop-blur border-b border-amber-700/30 px-4 py-2.5 flex items-center justify-between shrink-0 z-30">
-        <div className="flex items-center gap-3">
-          <Link to="/dashboard" className="btn-ghost py-1 px-2 text-xs">
-            <ChevronLeft className="w-3.5 h-3.5" />
-          </Link>
-          <div>
-            <h1 className="font-serif text-amber-400 text-sm font-semibold leading-none">
-              {campaign?.title ?? 'Session'}
-            </h1>
-            <p className="text-slate-500 text-xs mt-0.5">{campaign?.rpg_system}</p>
-          </div>
+    <div className="app">
+      <header className="topbar">
+        <div className="logo">
+          <span className="logo-icon">⚔</span>
+          Arcanum RPG
         </div>
 
         <div className="flex items-center gap-3">
-          <ConnectionBadge status={connectionStatus} />
-          <div className="w-px h-4 bg-slate-700" />
-          <Link
-            to={`/campaign/${campaignId}/characters`}
-            className="btn-ghost py-1 px-2 text-xs"
-            title="Characters"
-          >
-            <Users className="w-3.5 h-3.5" />
-          </Link>
-          <button
-            onClick={() => setShowMap((v) => !v)}
-            className={`btn-ghost py-1 px-2 text-xs ${showMap ? 'border-amber-600/60 text-amber-400' : ''}`}
-            title="World Map"
-          >
-            <Map className="w-3.5 h-3.5" />
-          </button>
-          <Link to="/knowledge" className="btn-ghost py-1 px-2 text-xs" title="Knowledge Bank">
-            <BookOpen className="w-3.5 h-3.5" />
-          </Link>
+          <div className="campaign-badge">{campaign?.title ?? 'The Shadow of Icewind Dale'}</div>
+          <span className={`difficulty-badge diff-${campaign?.difficulty ?? 'normal'}`}>
+            {difficultyLabel}
+          </span>
+          <div className="session-info">
+            {sessionInfoText}
+          </div>
+        </div>
+
+        <div className="topbar-right">
+          <div className="difficulty-badge diff-normal" onClick={openSettings}>
+            ⚙ Settings
+          </div>
         </div>
       </header>
 
-      {/* ── Gate blocked banner ── */}
-      {gateBlocked && (
-        <div className="bg-red-900/50 border-b border-red-700/60 px-4 py-2 flex items-center gap-2 text-red-300 text-xs shrink-0">
-          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-          <span>
-            The GM needs knowledge to continue.{' '}
-            <Link to="/knowledge" className="underline hover:text-red-200">
-              Upload a rulebook
-            </Link>{' '}
-            to unlock the session.
-          </span>
-          <button onClick={() => setGateBlocked(false)} className="ml-auto hover:text-red-200">
-            <X className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      )}
+      <aside className="sidebar">
+        <div className="sidebar-section">
+          <h3>Party</h3>
+          {party.length === 0 ? (
+            <p className="text-slate-400 text-xs">Nenhum membro disponível ainda.</p>
+          ) : (
+            party.slice(0, 5).map((member, index) => {
+              const hpMax = member.status?.hp_max ?? 1
+              const hpCur = member.status?.hp_current ?? 0
+              const hpPercent = Math.max(0, Math.min(100, (hpCur / hpMax) * 100))
+              const hpColor = hpPercent > 50 ? 'hp-full' : hpPercent > 25 ? 'hp-mid' : 'hp-low'
 
-      {/* ── Main area ── */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Left panel: character status (hidden on mobile) */}
-        {character && (
-          <aside className="hidden lg:flex flex-col w-64 border-r border-amber-700/20 p-3 gap-3 overflow-y-auto bg-slate-900/60 shrink-0">
-            <CharStatusPanel
-              character={character}
-              onExpand={() => window.open(`/campaign/${campaignId}/characters`, '_blank')}
-            />
-          </aside>
+              return (
+                <div
+                  key={member.id}
+                  className={`char-card ${member.id === character?.id ? 'active' : ''}`}
+                  onClick={() => setCharacter(member)}
+                >
+                  <div className="char-header">
+                    <div className="char-avatar">{member.name?.slice(0, 2).toUpperCase()}</div>
+                    <div>
+                      <div className="char-name">{member.name}</div>
+                      <div className="char-meta">
+                        {member.race ?? 'Unknown'} {member.character_class ?? ''} · Lv {member.level ?? 1}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="hp-bar-wrap">
+                    <div className="hp-label"><span>HP</span><span>{hpCur}/{hpMax}</span></div>
+                    <div className="hp-bar"><div className={`hp-fill ${hpColor}`} style={{ width: `${hpPercent}%` }} /></div>
+                  </div>
+                  {(member.status?.conditions ?? []).length > 0 && (
+                    <div className="conditions">
+                      {member.status?.conditions.map((cond) => (
+                        <span key={cond} className="condition-tag">{cond}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })
+          )}
+        </div>
+
+        <div className="sidebar-section">
+          <h3>Active Quests</h3>
+          <div className="quest-item">
+            <div className="quest-title">Recover the lost grimoire</div>
+            <div className="quest-sub">Find Valindra's spellbook before the watchers break through.</div>
+          </div>
+          <div className="quest-item">
+            <div className="quest-title">Protect Bryn Shander</div>
+            <div className="quest-sub">Hold the line against the winter wolves.</div>
+          </div>
+          <div className="quest-item complete">
+            <div className="quest-title">Delivered supplies</div>
+            <div className="quest-sub">Bremen is secure for now.</div>
+          </div>
+        </div>
+
+        <div className="sidebar-section" style={{ flex: 1 }}>
+          <h3>World State</h3>
+          <div className="text-slate-300 text-xs leading-relaxed bg-slate-900/80 border border-slate-800 rounded-xl p-3">
+            {campaign?.description ?? 'Current scene: Abandoned watchtower, 3rd floor. Storm raging outside. A strange glyph pulses on the wall.'}
+          </div>
+        </div>
+      </aside>
+
+      <main className="main">
+        <div className="tabs">
+          <div className={`tab ${activeTab === 'chat' ? 'active' : ''}`} onClick={() => setActiveTab('chat')}>
+            ⚔ Game Session
+          </div>
+          <div className={`tab ${activeTab === 'sheet' ? 'active' : ''}`} onClick={() => setActiveTab('sheet')}>
+            📜 Character Sheet
+          </div>
+          <div className={`tab ${activeTab === 'map' ? 'active' : ''}`} onClick={() => setActiveTab('map')}>
+            🗺 World Map
+          </div>
+        </div>
+
+        {activeTab === 'chat' && (
+          <div className="chat-container">
+            <div className="chat-wrap">
+              {messages.map((msg) => (
+                <MessageBubble key={msg.id} message={msg} />
+              ))}
+
+              {gmTyping && (
+                <div className="gm-typing">
+                  <div className="dot" />
+                  <div className="dot" />
+                  <div className="dot" />
+                  <span>Arcanum is narrating...</span>
+                </div>
+              )}
+
+              <div ref={messagesEndRef} />
+            </div>
+
+            <div className="input-area">
+              <div className="quick-actions">
+                <button type="button" className="quick-btn" onClick={() => quickAction('I attack!')}>⚔ Attack</button>
+                <button type="button" className="quick-btn" onClick={() => quickAction('I search the area carefully.')}>🔍 Search</button>
+                <button type="button" className="quick-btn" onClick={() => quickAction('I try to persuade the NPC.')}>💬 Persuade</button>
+                <button type="button" className="quick-btn" onClick={() => quickAction('I take a short rest.')}>🛌 Short Rest</button>
+                <button type="button" className="quick-btn" onClick={() => quickAction('I use stealth to hide.')}>👁 Stealth</button>
+                <button type="button" className="quick-btn" onClick={() => quickAction('OOC: What are our options here?')}>💭 OOC</button>
+              </div>
+              <div className="input-row">
+                <button type="button" className={`voice-btn ${voiceActive ? 'active' : ''}`} onClick={toggleVoice}>
+                  {voiceActive ? '⏹' : '🎙'}
+                </button>
+                <textarea
+                  ref={textareaRef}
+                  value={inputText}
+                  onChange={(e) => setInputText(e.target.value)}
+                  onInput={(e) => {
+                    const el = e.currentTarget
+                    el.style.height = 'auto'
+                    el.style.height = `${Math.min(el.scrollHeight, 128)}px`
+                  }}
+                  onKeyDown={handleKeyDown}
+                  placeholder="What do you do? Speak or type your action..."
+                  className="input-box"
+                  rows={1}
+                />
+                <button type="button" className="send-btn" onClick={() => void sendAction(inputText)}>
+                  ➤
+                </button>
+              </div>
+            </div>
+          </div>
         )}
 
-        {/* Center: chat */}
-        <div className="flex flex-col flex-1 overflow-hidden">
-          {/* Messages */}
-          <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
-            {messages.length === 0 && (
-              <div className="flex flex-col items-center justify-center h-full gap-4 text-center">
-                <div className="w-16 h-16 bg-amber-900/20 rounded-full flex items-center justify-center border border-amber-700/30">
-                  <Dice6 className="w-8 h-8 text-amber-700/60" />
-                </div>
+        {activeTab === 'sheet' && (
+          <div id="tab-sheet" className="sheet-wrap">
+            <div className="stat-card" style={{ gridColumn: '1 / -1' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '14px' }}>
+                <div className="char-avatar" style={{ width: 52, height: 52, fontSize: 20 }}>{character?.name?.slice(0, 2).toUpperCase()}</div>
                 <div>
-                  <p className="text-slate-300 font-serif italic text-sm">
-                    The adventure awaits…
-                  </p>
-                  <p className="text-slate-500 text-xs mt-1">
-                    Describe your action to begin the session.
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {messages.map((msg) => (
-              <MessageBubble key={msg.id} message={msg} />
-            ))}
-
-            {/* GM typing indicator */}
-            {gmTyping && (
-              <div className="flex items-center gap-2 animate-fade-in">
-                <div className="chat-gm flex items-center gap-2">
-                  <div className="flex gap-1">
-                    {[0, 1, 2].map((i) => (
-                      <div
-                        key={i}
-                        className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-bounce"
-                        style={{ animationDelay: `${i * 0.15}s` }}
-                      />
-                    ))}
+                  <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text1)' }}>{character?.name ?? 'Adventurer'}</div>
+                  <div style={{ fontSize: 13, color: 'var(--text3)' }}>
+                    {character?.race ?? 'Unknown'} {character?.character_class ?? 'Class'} · Level {character?.level ?? 1}
                   </div>
-                  <span className="text-amber-600/70 text-xs font-serif italic">
-                    The GM is narrating…
-                  </span>
+                </div>
+                <div style={{ marginLeft: 'auto', display: 'flex', gap: '12px' }}>
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontSize: 10, color: 'var(--text3)', textTransform: 'uppercase' }}>AC</div>
+                    <div style={{ fontSize: 24, fontWeight: 700, color: 'var(--teal)' }}>{character?.attributes?.armor_class ?? 10}</div>
+                  </div>
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontSize: 10, color: 'var(--text3)', textTransform: 'uppercase' }}>Speed</div>
+                    <div style={{ fontSize: 24, fontWeight: 700, color: 'var(--text1)' }}>{character?.attributes?.speed ?? 30}</div>
+                  </div>
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontSize: 10, color: 'var(--text3)', textTransform: 'uppercase' }}>Initiative</div>
+                    <div style={{ fontSize: 24, fontWeight: 700, color: 'var(--gold)' }}>+{character?.attributes?.dexterity ?? 2}</div>
+                  </div>
                 </div>
               </div>
-            )}
-
-            <div ref={messagesEndRef} />
-          </div>
-
-          {/* Input area */}
-          <div className="border-t border-amber-700/20 bg-slate-900/90 p-3 shrink-0">
-            <div className="flex gap-2 items-end">
-              <textarea
-                ref={textareaRef}
-                value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Describe your action… (Enter to send, Shift+Enter for new line)"
-                className="input-dark flex-1 resize-none min-h-[44px] max-h-32 leading-relaxed py-2.5"
-                rows={1}
-                disabled={isSending || connectionStatus !== 'connected'}
-                style={{ height: 'auto' }}
-                onInput={(e) => {
-                  const el = e.currentTarget
-                  el.style.height = 'auto'
-                  el.style.height = Math.min(el.scrollHeight, 128) + 'px'
-                }}
-              />
-              <button
-                onClick={() => void sendAction(inputText)}
-                disabled={
-                  !inputText.trim() ||
-                  isSending ||
-                  connectionStatus !== 'connected'
-                }
-                className="btn-primary px-3 py-2.5 shrink-0"
-                title="Send action (Enter)"
-              >
-                {isSending ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Send className="w-4 h-4" />
-                )}
-              </button>
+              <div className="hp-bar-wrap" style={{ marginTop: 8 }}>
+                <div className="hp-label"><span style={{ fontWeight: 600 }}>Hit Points</span><span style={{ fontWeight: 700, color: 'var(--gold)' }}>{character?.status?.hp_current ?? 0} / {character?.status?.hp_max ?? 0}</span></div>
+                <div className="hp-bar" style={{ height: 10 }}><div className={`hp-fill ${character?.status?.hp_current && character?.status?.hp_max ? (character.status.hp_current / character.status.hp_max) > 0.5 ? 'hp-full' : (character.status.hp_current / character.status.hp_max) > 0.25 ? 'hp-mid' : 'hp-low' : 'hp-low'}`} style={{ width: `${character?.status?.hp_max ? Math.max(0, Math.min(100, (character.status.hp_current / character.status.hp_max) * 100)) : 0}%` }} /></div>
+              </div>
             </div>
-            <p className="text-slate-700 text-xs mt-1.5 text-right">
-              Enter to send · Shift+Enter for new line
-            </p>
-          </div>
-        </div>
 
-        {/* Right panel: World Map (toggleable) */}
-        {showMap && (
-          <aside className="hidden xl:flex flex-col w-72 border-l border-amber-700/20 bg-slate-900/60 shrink-0">
+            <div className="stat-card">
+              <h4>Ability Scores</h4>
+              <div className="stat-grid">
+                {['STR','DEX','CON','INT','WIS','CHA'].map((key) => (
+                  <div key={key} className="stat-box">
+                    <div className="stat-name">{key}</div>
+                    <div className="stat-val">{character?.attributes?.[key.toLowerCase() as keyof Character['attributes']] ?? 10}</div>
+                    <div className="stat-mod">+{Math.floor(((character?.attributes?.[key.toLowerCase() as keyof Character['attributes']] ?? 10) - 10) / 2)}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="stat-card">
+              <h4>Inventory</h4>
+              {(character?.inventory.length ?? 0) === 0 ? (
+                <p className="text-slate-400 text-sm">No inventory items available.</p>
+              ) : (
+                character?.inventory.slice(0, 6).map((item) => (
+                  <div key={item.id} className="inventory-row">
+                    <span className="item-name">{item.name}</span>
+                    <span className="item-type">{item.description ?? (item.equipped ? 'equipped' : 'item')}</span>
+                    <span className="item-qty">{item.quantity ?? 1}</span>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="stat-card">
+              <h4>Spell Slots / Resources</h4>
+              <div className="flex flex-wrap gap-3">
+                {Object.entries(character?.status?.spell_slots ?? { '1': 2, '2': 1 }).map(([level, count]) => (
+                  <div key={level} className="badge badge-warning">
+                    Lv {level}: {count} slots
+                  </div>
+                ))}
+              </div>
+              <div className="mt-3 text-slate-400 text-xs">
+                Superior dice and spell resources are tracked by the GM during gameplay.
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'map' && (
+          <div id="tab-map" className="map-wrap">
             <WorldMap
               campaignId={campaignId ?? ''}
               onLocationSelect={(name) => void sendAction(`Vou até ${name}`)}
             />
-          </aside>
+          </div>
         )}
-      </div>
+      </main>
     </div>
   )
 }

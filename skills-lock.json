@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "skills": {
+    "python-packaging": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "computedHash": "ff3e59808ce3fdf85a4ce0538f69f94a92d5d2863343bf26997509ec1e1ee014"
+    },
+    "vercel-react-best-practices": {
+      "source": "vercel-labs/agent-skills",
+      "sourceType": "github",
+      "computedHash": "ab346ab2aa2fb81f44d2c46b699efa54224e019cb7a506cb7e6978c26da507db"
+    }
+  }
+}

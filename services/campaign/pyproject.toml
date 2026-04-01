@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rpg-campaign"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi==0.111.0",
+    "uvicorn[standard]==0.29.0",
+    "sqlalchemy[asyncio]==2.0.30",
+    "asyncpg==0.29.0",
+    "langchain==0.2.16",
+    "langchain-openai==0.1.25",
+    "langchain-community==0.2.16",
+    "langsmith>=0.1.100,<0.2.0",
+    "openai>=1.40.0,<2.0.0",
+    "httpx==0.27.0",
+    "python-dotenv==1.0.1",
+    "pydantic>=2.7.4,<3.0.0",
+    "websockets==12.0",
+    "pgvector==0.2.5",
+    "psycopg2-binary==2.9.9",
+    "PyJWT>=2.8.0,<3.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "debugpy>=1.8.0",
+    "ruff>=0.4.0",
+    "mypy>=1.10.0",
+]
+
+[tool.setuptools]
+py-modules = []  # Docker service — no Python package to distribute
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "N", "W"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+disallow_untyped_defs = true
+warn_return_any = true
+ignore_missing_imports = true

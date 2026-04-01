@@ -1,28 +1,32 @@
 import os
-from langchain.chains import ConversationalRetrievalChain
-from langchain.memory import ConversationBufferWindowMemory
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from langchain.schema import BaseRetriever
-from langchain.prompts import (
+from langchain_core.prompts import (
     ChatPromptTemplate,
     SystemMessagePromptTemplate,
     HumanMessagePromptTemplate,
     MessagesPlaceholder,
 )
+from langchain_core.retrievers import BaseRetriever
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.runnables import RunnablePassthrough
+from langchain_core.runnables.history import RunnableWithMessageHistory
+from langchain_core.chat_history import InMemoryChatMessageHistory
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from prompts import GM_SYSTEM_PROMPT
 
+# In-memory store for chat histories keyed by session_id
+_session_store: dict = {}
 
-def build_gm_chain(retriever: BaseRetriever) -> ConversationalRetrievalChain:
+
+def _get_session_history(session_id: str) -> InMemoryChatMessageHistory:
+    if session_id not in _session_store:
+        _session_store[session_id] = InMemoryChatMessageHistory()
+    return _session_store[session_id]
+
+
+def build_gm_chain(retriever: BaseRetriever):
     """
-    Build and return a ConversationalRetrievalChain configured as an AI Game Master.
-
-    Args:
-        retriever: A LangChain-compatible retriever that searches the RPG knowledge base
-                   (knowledge_chunks from the ingestion service).
-
-    Returns:
-        A ready-to-use ConversationalRetrievalChain with GPT-4o, windowed memory, and
-        the GM system prompt injected via a custom combine-docs prompt.
+    Build and return a RunnableWithMessageHistory chain configured as an AI Game Master.
+    Compatible with langchain >= 1.0.
     """
     llm = ChatOpenAI(
         model="gpt-4o",
@@ -31,36 +35,32 @@ def build_gm_chain(retriever: BaseRetriever) -> ConversationalRetrievalChain:
         api_key=os.getenv("OPENAI_API_KEY"),
     )
 
-    memory = ConversationBufferWindowMemory(
-        k=10,
-        memory_key="chat_history",
-        return_messages=True,
-        output_key="answer",
-    )
-
-    # Build a QA prompt that injects the GM system prompt together with
-    # the retrieved context and the conversation history.
-    combine_docs_prompt = ChatPromptTemplate.from_messages(
+    prompt = ChatPromptTemplate.from_messages(
         [
             SystemMessagePromptTemplate.from_template(
-                GM_SYSTEM_PROMPT
-                + "\n\n## CONTEXTO RECUPERADO DO CONHECIMENTO\n{context}"
+                GM_SYSTEM_PROMPT + "\n\n## CONTEXTO RECUPERADO DO CONHECIMENTO\n{context}"
             ),
             MessagesPlaceholder(variable_name="chat_history"),
             HumanMessagePromptTemplate.from_template("{question}"),
         ]
     )
 
-    chain = ConversationalRetrievalChain.from_llm(
-        llm=llm,
-        retriever=retriever,
-        memory=memory,
-        return_source_documents=True,
-        combine_docs_chain_kwargs={"prompt": combine_docs_prompt},
-        verbose=False,
+    def format_docs(docs):
+        return "\n\n".join(d.page_content for d in docs)
+
+    chain = (
+        RunnablePassthrough.assign(context=lambda x: format_docs(retriever.invoke(x["question"])))
+        | prompt
+        | llm
+        | StrOutputParser()
     )
 
-    return chain
+    return RunnableWithMessageHistory(
+        chain,
+        _get_session_history,
+        input_messages_key="question",
+        history_messages_key="chat_history",
+    )
 
 
 def get_embeddings() -> OpenAIEmbeddings:

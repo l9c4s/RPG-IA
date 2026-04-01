@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from sqlalchemy import (
     Boolean,
     Column,
+    DateTime,
     Integer,
     Text,
     func,
@@ -73,8 +74,8 @@ class PdfSource(Base):
     processed = Column(Boolean, default=False, nullable=False)
     chunk_count = Column(Integer, default=0, nullable=False)
     error_msg = Column(Text, nullable=True)
-    created_at = Column(Text, server_default=func.now())
-    updated_at = Column(Text, server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 # ─── Injeção de dependência ───────────────────────────────────────────────────

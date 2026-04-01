@@ -1,12 +1,12 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import type { WSMessage, WSMessageType } from '../api/types'
+import type { WSMessage, WSMessageType } from '../types'
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error' | 'reconnecting'
 
 interface UseWebSocketOptions {
-  onMessage?: (message: WSMessage) => void
-  reconnectInterval?: number
-  maxReconnectAttempts?: number
+  onMessage?:             (message: WSMessage) => void
+  reconnectInterval?:     number
+  maxReconnectAttempts?:  number
 }
 
 interface UseWebSocketReturn {
@@ -38,7 +38,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketRet
   // Keep callback ref fresh without re-triggering effects
   useEffect(() => { onMessageRef.current = onMessage }, [onMessage])
 
-  const [status, setStatus]    = useState<ConnectionStatus>('disconnected')
+  const [status,    setStatus]    = useState<ConnectionStatus>('disconnected')
   const [lastError, setLastError] = useState<string | null>(null)
 
   // ── Cleanup helpers ──────────────────────────────────────────────────────
@@ -70,7 +70,8 @@ export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketRet
       setStatus('connecting')
       setLastError(null)
 
-      const token   = localStorage.getItem('access_token') ?? ''
+      const rawToken = localStorage.getItem('access_token')
+      const token    = rawToken ? (JSON.parse(rawToken) as string) : ''
       const proto   = window.location.protocol === 'https:' ? 'wss' : 'ws'
       const host    = window.location.host
       const url     = `${proto}://${host}/ws/session/${sessionId}/player/${playerId}?token=${encodeURIComponent(token)}`

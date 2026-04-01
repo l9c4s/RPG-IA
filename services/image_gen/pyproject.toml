@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rpg-image-gen"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi==0.111.0",
+    "uvicorn[standard]==0.29.0",
+    "openai>=1.40.0,<2.0.0",
+    "httpx==0.27.0",
+    "minio==7.2.7",
+    "sqlalchemy[asyncio]==2.0.30",
+    "asyncpg==0.29.0",
+    "python-dotenv==1.0.1",
+    "pydantic==2.7.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "debugpy>=1.8.0",
+    "ruff>=0.4.0",
+    "mypy>=1.10.0",
+]
+
+[tool.setuptools]
+py-modules = []  # Docker service — no Python package to distribute
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "N", "W"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+disallow_untyped_defs = true
+warn_return_any = true
+ignore_missing_imports = true

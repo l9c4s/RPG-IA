@@ -1,0 +1,66 @@
+# Uso: docker compose -f docker-compose.yml -f docker-compose.debug.yml up -d
+# Ativa debugpy em cada serviço com porta dedicada.
+# O VS Code conecta via "Attach to Process" usando o launch.json.
+# Serviços sobem imediatamente — VS Code pode anexar a qualquer momento.
+
+services:
+  gateway:
+    build: ./services/gateway
+    volumes:
+      - ./services/gateway:/app
+    environment:
+      DEBUG_PORT: "5678"
+    ports:
+      - "5678:5678"
+    command: ["/bin/sh", "debug_entrypoint.sh"]
+
+  campaign_service:
+    build: ./services/campaign
+    volumes:
+      - ./services/campaign:/app
+    environment:
+      DEBUG_PORT: "5679"
+    ports:
+      - "5679:5679"
+    command: ["sh", "-c", "python -m debugpy --listen 0.0.0.0:5679 -m uvicorn main:app --host 0.0.0.0 --port 8002 --reload"]
+
+  pdf_service:
+    build: ./services/pdf_ingestion
+    volumes:
+      - ./services/pdf_ingestion:/app
+    environment:
+      DEBUG_PORT: "5680"
+    ports:
+      - "5680:5680"
+      - "8001:8001"
+    command: ["sh", "-c", "python -m debugpy --listen 0.0.0.0:5680 -m uvicorn main:app --host 0.0.0.0 --port 8001 --reload"]
+
+  character_service:
+    build: ./services/character
+    volumes:
+      - ./services/character:/app
+    environment:
+      DEBUG_PORT: "5681"
+    ports:
+      - "5681:5681"
+    command: ["sh", "-c", "python -m debugpy --listen 0.0.0.0:5681 -m uvicorn main:app --host 0.0.0.0 --port 8003 --reload"]
+
+  image_service:
+    build: ./services/image_gen
+    volumes:
+      - ./services/image_gen:/app
+    environment:
+      DEBUG_PORT: "5682"
+    ports:
+      - "5682:5682"
+    command: ["sh", "-c", "python -m debugpy --listen 0.0.0.0:5682 -m uvicorn main:app --host 0.0.0.0 --port 8004 --reload"]
+
+  tts_service:
+    build: ./services/tts
+    volumes:
+      - ./services/tts:/app
+    environment:
+      DEBUG_PORT: "5683"
+    ports:
+      - "5683:5683"
+    command: ["sh", "-c", "python -m debugpy --listen 0.0.0.0:5683 -m uvicorn main:app --host 0.0.0.0 --port 8005 --reload"]

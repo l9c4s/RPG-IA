@@ -10,7 +10,7 @@ load_dotenv()
 
 DATABASE_URL: str = os.getenv(
     "DATABASE_URL",
-    "postgresql+asyncpg://rpg:rpg@localhost:5432/rpg_images",
+    "postgresql+asyncpg://rpg_user:change_me_strong_password@postgres:5432/rpg_platform",
 )
 
 engine = create_async_engine(

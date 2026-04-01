@@ -58,7 +58,7 @@ async def register(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
     new_user = User(
         username=user_data.username,
         email=user_data.email,
-        hashed_password=hashed_password,
+        password_hash=hashed_password,
     )
 
     try:
@@ -80,7 +80,7 @@ async def login(credentials: UserLogin, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.email == credentials.email))
     user = result.scalar_one_or_none()
 
-    if not user or not verify_password(credentials.password, user.hashed_password):
+    if not user or not verify_password(credentials.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="E-mail ou senha inválidos.",

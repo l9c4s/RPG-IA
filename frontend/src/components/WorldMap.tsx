@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { Map, Loader2, RefreshCw, Compass } from 'lucide-react'
 import { api } from '../api/client'
-import type { Location } from '../api/types'
+import type { Location } from '../types'
 
 // ─── Icon per location type ────────────────────────────────────────────────
 const TYPE_COLOR: Record<Location['type'], string> = {
@@ -72,6 +72,7 @@ export default function WorldMap({ campaignId, onLocationSelect }: WorldMapProps
   const [locations,    setLocations]    = useState<Location[]>([])
   const [isLoading,    setIsLoading]    = useState(true)
   const [hoveredId,    setHoveredId]    = useState<string | null>(null)
+  const [selectedId,   setSelectedId]   = useState<string | null>(null)
   const [svgSize,      setSvgSize]      = useState({ width: 300, height: 400 })
 
   const fetchLocations = useCallback(async () => {
@@ -104,6 +105,7 @@ export default function WorldMap({ campaignId, onLocationSelect }: WorldMapProps
   }, [])
 
   const hoveredLocation = locations.find((l) => l.id === hoveredId) ?? null
+  const selectedLocation = locations.find((l) => l.id === selectedId) ?? hoveredLocation
 
   return (
     <div className="flex flex-col h-full">
@@ -238,7 +240,11 @@ export default function WorldMap({ campaignId, onLocationSelect }: WorldMapProps
                   transform={`translate(${cx}, ${cy})`}
                   style={{ cursor: loc.discovered ? 'pointer' : 'default' }}
                   opacity={opacity}
-                  onClick={() => loc.discovered && onLocationSelect(loc.name)}
+                  onClick={() => {
+                    if (!loc.discovered) return
+                    setSelectedId(loc.id)
+                    onLocationSelect(loc.name)
+                  }}
                   onMouseEnter={() => setHoveredId(loc.id)}
                   onMouseLeave={() => setHoveredId(null)}
                 >
@@ -301,7 +307,33 @@ export default function WorldMap({ campaignId, onLocationSelect }: WorldMapProps
       </div>
 
       {/* Legend */}
-      <div className="px-3 py-2 border-t border-amber-700/20 shrink-0">
+      <div className="px-3 py-2 border-t border-amber-700/20 shrink-0 space-y-3">
+        {selectedLocation ? (
+          <div className="bg-slate-950 border border-slate-800 rounded-2xl p-3 text-sm">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-amber-300 uppercase tracking-[0.2em] text-[10px] font-semibold">Selected</p>
+                <p className="font-serif text-slate-100 font-semibold">{selectedLocation.name}</p>
+              </div>
+              <span className="text-xs text-slate-500 capitalize">{selectedLocation.type}</span>
+            </div>
+            <p className="text-slate-400 text-xs mt-2 leading-snug">{selectedLocation.description}</p>
+            <div className="mt-3 flex flex-wrap gap-2 text-xs">
+              {selectedLocation.is_current && <span className="badge badge-success">Current Location</span>}
+              {!selectedLocation.discovered && <span className="badge badge-error">Undiscovered</span>}
+              {selectedLocation.discovered && !selectedLocation.is_current && (
+                <button
+                  type="button"
+                  onClick={() => onLocationSelect(selectedLocation.name)}
+                  className="btn-primary text-xs px-3 py-1"
+                >
+                  Travel there
+                </button>
+              )}
+            </div>
+          </div>
+        ) : null}
+
         <div className="flex flex-wrap gap-x-3 gap-y-1">
           {(Object.entries(TYPE_LABEL) as [Location['type'], string][]).map(([type, icon]) => (
             <span key={type} className="flex items-center gap-1 text-xs text-slate-500">
@@ -321,7 +353,7 @@ export default function WorldMap({ campaignId, onLocationSelect }: WorldMapProps
 // ─── Placeholder data (shown when API is not yet available) ────────────────
 const PLACEHOLDER_LOCATIONS: Location[] = [
   {
-    id: '1', name: 'Phandalin', description: 'A small frontier town. The party's base of operations.',
+    id: '1', name: 'Phandalin', description: "A small frontier town. The party's base of operations.",
     x: 42, y: 45, type: 'city', is_current: true, discovered: true,
   },
   {

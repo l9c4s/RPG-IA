@@ -17,7 +17,7 @@ import uuid
 from typing import Any
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, status
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Response, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from minio import Minio
 from minio.error import S3Error
@@ -107,7 +107,7 @@ async def health_check() -> dict[str, str]:
 )
 async def upload_pdf(
     file: UploadFile = File(..., description="Arquivo PDF a ser enviado"),
-    title: str = Form(..., description="Título do documento"),
+    title: str | None = Form(default=None, description="Título do documento (opcional, usa nome do arquivo)"),
     rpg_system: str | None = Form(default=None, description="Sistema de RPG"),
     source_type: str | None = Form(default=None, description="Tipo de fonte"),
     db: AsyncSession = Depends(get_db),
@@ -127,6 +127,10 @@ async def upload_pdf(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Apenas arquivos PDF são aceitos.",
             )
+
+    # Deriva título do nome do arquivo se não informado
+    if not title:
+        title = (file.filename or "documento").rsplit(".", 1)[0].replace("_", " ").replace("-", " ").strip()
 
     # Gera nome único no MinIO para evitar colisões
     unique_prefix = uuid.uuid4().hex
@@ -215,13 +219,54 @@ async def list_sources(
 ) -> PdfSourceListResponse:
     """Retorna todos os registros de pdf_sources ordenados por data de criação (mais recente primeiro)."""
 
-    result = await db.execute(
-        text("SELECT * FROM pdf_sources ORDER BY created_at DESC")
-    )
-    rows = result.mappings().all()
+    try:
+        result = await db.execute(
+            text("SELECT * FROM pdf_sources ORDER BY created_at DESC")
+        )
+        rows = result.mappings().all()
+        sources = [PdfSourceResponse(**dict(row)) for row in rows]
+        return PdfSourceListResponse(total=len(sources), sources=sources)
+    except Exception as exc:
+        print(f"[list_sources] ERRO: {exc}", flush=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao listar fontes: {exc}",
+        )
 
-    sources = [PdfSourceResponse(**dict(row)) for row in rows]
-    return PdfSourceListResponse(total=len(sources), sources=sources)
+
+# ─── DELETE /sources/{source_id} ─────────────────────────────────────────────
+
+@app.delete(
+    "/sources/{source_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+    tags=["PDF"],
+    summary="Remove um PDF do banco de conhecimento",
+)
+async def delete_source(
+    source_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    result = await db.execute(
+        text("SELECT id FROM pdf_sources WHERE id = :id"),
+        {"id": str(source_id)},
+    )
+    if result.one_or_none() is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Fonte PDF com id '{source_id}' não encontrada.",
+        )
+
+    await db.execute(
+        text("DELETE FROM knowledge_chunks WHERE source_id = :id"),
+        {"id": str(source_id)},
+    )
+    await db.execute(
+        text("DELETE FROM pdf_sources WHERE id = :id"),
+        {"id": str(source_id)},
+    )
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # ─── GET /sources/{source_id}/status ─────────────────────────────────────────
@@ -262,6 +307,51 @@ async def get_source_status(
     return ProcessingStatusResponse.from_orm_source(_Row(dict(row)))
 
 
+# ─── POST /sources/{source_id}/retry ─────────────────────────────────────────
+
+@app.post(
+    "/sources/{source_id}/retry",
+    status_code=status.HTTP_202_ACCEPTED,
+    tags=["PDF"],
+    summary="Reenfileira o processamento de um PDF que falhou",
+)
+async def retry_source(
+    source_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    Reseta o estado do pdf_source (processed=False, error_msg=None, chunk_count=0)
+    e reenfileira a task Celery para reprocessamento.
+    """
+    result = await db.execute(
+        text("SELECT * FROM pdf_sources WHERE id = :id"),
+        {"id": str(source_id)},
+    )
+    row = result.mappings().one_or_none()
+
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Fonte PDF com id '{source_id}' não encontrada.",
+        )
+
+    await db.execute(
+        text(
+            "UPDATE pdf_sources SET processed = false, error_msg = null, chunk_count = 0, "
+            "updated_at = now() WHERE id = :id"
+        ),
+        {"id": str(source_id)},
+    )
+    await db.commit()
+
+    process_pdf.apply_async(
+        args=[str(source_id)],
+        queue="pdf_processing",
+    )
+
+    return {"source_id": str(source_id), "status": "enqueued", "message": "Reprocessamento iniciado."}
+
+
 # ─── GET /knowledge/stats ─────────────────────────────────────────────────────
 
 @app.get(
@@ -281,23 +371,29 @@ async def knowledge_stats(
     result = await db.execute(text("SELECT * FROM v_knowledge_status LIMIT 1"))
     row = result.mappings().one_or_none()
 
+    processing_result = await db.execute(
+        text("SELECT COUNT(*) FROM pdf_sources WHERE processed = false AND error_msg IS NULL")
+    )
+    processing_count = int(processing_result.scalar() or 0)
+
     if row is None:
-        # View retornou vazia — banco de conhecimento está vazio
         return KnowledgeStatsResponse(
             total_chunks=0,
             gm_is_ready=False,
             total_systems=0,
-            sistemas_cobertos=[],
+            systems_covered=[],
             total_sources=0,
+            processing_count=processing_count,
         )
 
     data = dict(row)
-    sistemas_cobertos: list[str | None] = data.get("sistemas_cobertos") or []
+    systems_covered = [s for s in (data.get("sistemas_cobertos") or []) if s]
 
     return KnowledgeStatsResponse(
         total_chunks=int(data.get("total_chunks", 0)),
         gm_is_ready=bool(data.get("gm_is_ready", False)),
         total_systems=int(data.get("total_systems", 0)),
-        sistemas_cobertos=sistemas_cobertos,
+        systems_covered=systems_covered,
         total_sources=int(data.get("total_sources", 0)),
+        processing_count=processing_count,
     )

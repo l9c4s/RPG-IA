@@ -43,8 +43,13 @@ class CampaignDB(Base):
     rpg_system: Mapped[str] = mapped_column(String(100), nullable=False)
     difficulty: Mapped[str] = mapped_column(String(20), nullable=False, default="medium")
     tone: Mapped[str] = mapped_column(String(100), nullable=False, default="heroic")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="lobby")
+    locations_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
 

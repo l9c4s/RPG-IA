@@ -1,3 +1,4 @@
+from uuid import UUID
 from pydantic import BaseModel, EmailStr, Field, ConfigDict
 
 
@@ -44,7 +45,7 @@ class Token(BaseModel):
 class UserResponse(BaseModel):
     """Dados públicos do usuário retornados pela API."""
 
-    id: int = Field(description="Identificador único do usuário.")
+    id: UUID = Field(description="Identificador único do usuário.")
     username: str = Field(description="Nome de usuário.")
     email: EmailStr = Field(description="Endereço de e-mail.")
     is_active: bool = Field(description="Indica se a conta está ativa.")

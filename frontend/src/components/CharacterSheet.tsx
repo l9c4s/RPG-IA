@@ -2,14 +2,16 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
   ChevronLeft, Edit3, Save, X, Plus, Trash2,
-  Heart, Shield, Zap, Star, Users, Loader2, AlertCircle
+  Heart, Shield, Zap, Star, Users, AlertCircle
 } from 'lucide-react'
 import { api } from '../api/client'
 import { useAuth } from '../hooks/useAuth'
+import { Spinner } from './ui/Spinner'
+import { Badge } from './ui/Badge'
 import type {
-  Character, AbilityScores, CharacterStatus, Condition,
+  Character, CharacterStatus, CharacterAttributes, Condition,
   InventoryItem, SpellSlots, CharacterAbility
-} from '../api/types'
+} from '../types'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 function abilityModifier(score: number): number {
@@ -20,11 +22,13 @@ function formatModifier(mod: number): string {
   return mod >= 0 ? `+${mod}` : `${mod}`
 }
 
-const ABILITY_NAMES: (keyof AbilityScores)[] = [
+type AbilityKey = 'strength' | 'dexterity' | 'constitution' | 'intelligence' | 'wisdom' | 'charisma'
+
+const ABILITY_NAMES: AbilityKey[] = [
   'strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma',
 ]
 
-const ABILITY_SHORT: Record<keyof AbilityScores, string> = {
+const ABILITY_SHORT: Record<AbilityKey, string> = {
   strength:     'STR',
   dexterity:    'DEX',
   constitution: 'CON',
@@ -33,13 +37,25 @@ const ABILITY_SHORT: Record<keyof AbilityScores, string> = {
   charisma:     'CHA',
 }
 
+const DEFAULT_STATUS: CharacterStatus = {
+  hp_current: 0, hp_max: 0, hp_temp: 0,
+  conditions: [], spell_slots: {}, exhaustion: 0,
+  death_saves_success: 0, death_saves_failure: 0,
+}
+
+const DEFAULT_ATTRS: CharacterAttributes = {
+  strength: 10, dexterity: 10, constitution: 10,
+  intelligence: 10, wisdom: 10, charisma: 10,
+  armor_class: 10, initiative: 0, speed: 30,
+}
+
 const CONDITIONS: Condition[] = [
   'Blinded', 'Charmed', 'Deafened', 'Exhaustion', 'Frightened',
   'Grappled', 'Incapacitated', 'Invisible', 'Paralyzed', 'Petrified',
   'Poisoned', 'Prone', 'Restrained', 'Stunned', 'Unconscious',
 ]
 
-const SKILL_ABILITY: Record<string, keyof AbilityScores> = {
+const SKILL_ABILITY: Record<string, AbilityKey> = {
   acrobatics:      'dexterity',
   animal_handling: 'wisdom',
   arcana:          'intelligence',
@@ -150,7 +166,7 @@ function HpTracker({ status, edit, onChange }: HpTrackerProps): React.ReactEleme
               <p className="text-xs text-green-400 mb-1">Successes</p>
               <div className="flex gap-1">
                 {[0, 1, 2].map((i) => (
-                  <div key={i} className={`w-4 h-4 rounded-full border-2 ${i < status.death_saves_successes ? 'bg-green-500 border-green-400' : 'border-slate-600'}`} />
+                  <div key={i} className={`w-4 h-4 rounded-full border-2 ${i < status.death_saves_success ? 'bg-green-500 border-green-400' : 'border-slate-600'}`} />
                 ))}
               </div>
             </div>
@@ -158,7 +174,7 @@ function HpTracker({ status, edit, onChange }: HpTrackerProps): React.ReactEleme
               <p className="text-xs text-red-400 mb-1">Failures</p>
               <div className="flex gap-1">
                 {[0, 1, 2].map((i) => (
-                  <div key={i} className={`w-4 h-4 rounded-full border-2 ${i < status.death_saves_failures ? 'bg-red-500 border-red-400' : 'border-slate-600'}`} />
+                  <div key={i} className={`w-4 h-4 rounded-full border-2 ${i < status.death_saves_failure ? 'bg-red-500 border-red-400' : 'border-slate-600'}`} />
                 ))}
               </div>
             </div>
@@ -488,12 +504,14 @@ export default function CharacterSheet(): React.ReactElement {
     setError(null)
   }
 
-  const ch = editMode ? draft : character
+  const ch    = editMode ? draft : character
+  const attrs = ch?.attributes ?? DEFAULT_ATTRS
+  const stat  = ch?.status    ?? DEFAULT_STATUS
 
   if (isLoading) {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center">
-        <Loader2 className="w-8 h-8 text-amber-600 animate-spin" />
+        <Spinner size="lg" />
       </div>
     )
   }
@@ -524,7 +542,7 @@ export default function CharacterSheet(): React.ReactElement {
                 <X className="w-3.5 h-3.5" /> Cancel
               </button>
               <button onClick={saveCharacter} disabled={isSaving} className="btn-primary py-1.5 text-xs">
-                {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                {isSaving ? <Spinner size="sm" /> : <Save className="w-3.5 h-3.5" />}
                 Save
               </button>
             </>
@@ -588,12 +606,12 @@ export default function CharacterSheet(): React.ReactElement {
                 <div className="flex items-center gap-3 shrink-0">
                   <div className="stat-box">
                     <Shield className="w-3 h-3 text-blue-400" />
-                    <p className="text-xl font-bold text-slate-100">{ch.status.ac}</p>
+                    <p className="text-xl font-bold text-slate-100">{attrs.armor_class}</p>
                     <p className="text-xs text-slate-500">AC</p>
                   </div>
                   <div className="stat-box">
                     <Zap className="w-3 h-3 text-amber-400" />
-                    <p className="text-xl font-bold text-slate-100">{ch.status.speed}</p>
+                    <p className="text-xl font-bold text-slate-100">{attrs.speed}</p>
                     <p className="text-xs text-slate-500">Speed</p>
                   </div>
                   <div className="stat-box">
@@ -608,14 +626,14 @@ export default function CharacterSheet(): React.ReactElement {
             {/* ── HP + Conditions ── */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <HpTracker
-                status={ch.status}
+                status={stat}
                 edit={editMode}
                 onChange={(s) => draft && setDraft({ ...draft, status: s })}
               />
               <ConditionsPanel
-                conditions={ch.status.conditions}
+                conditions={stat.conditions}
                 edit={editMode}
-                onChange={(c) => draft && setDraft({ ...draft, status: { ...draft.status, conditions: c } })}
+                onChange={(c) => draft && setDraft({ ...draft, status: { ...(draft.status ?? DEFAULT_STATUS), conditions: c } })}
               />
             </div>
 
@@ -649,12 +667,12 @@ export default function CharacterSheet(): React.ReactElement {
                       <StatBox
                         key={ability}
                         name={ABILITY_SHORT[ability]}
-                        score={ch.ability_scores[ability]}
+                        score={attrs[ability]}
                         edit={editMode}
                         onChange={(v) =>
                           draft && setDraft({
                             ...draft,
-                            ability_scores: { ...draft.ability_scores, [ability]: v },
+                            attributes: { ...(draft.attributes ?? DEFAULT_ATTRS), [ability]: v },
                           })
                         }
                       />
@@ -667,8 +685,8 @@ export default function CharacterSheet(): React.ReactElement {
                   <h3 className="font-serif text-amber-400 text-sm tracking-wide mb-3">Saving Throws</h3>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                     {ABILITY_NAMES.map((ability) => {
-                      const prof = ch.saving_throws[ability]
-                      const base = abilityModifier(ch.ability_scores[ability])
+                      const prof = false
+                      const base = abilityModifier(attrs[ability])
                       const total = base + (prof ? proficiencyBonus(ch.level) : 0)
                       return (
                         <div key={ability} className="flex items-center gap-2 text-sm">
@@ -711,8 +729,8 @@ export default function CharacterSheet(): React.ReactElement {
                 <h3 className="font-serif text-amber-400 text-sm tracking-wide mb-3">Skills</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                   {Object.entries(SKILL_ABILITY).map(([skill, ability]) => {
-                    const prof   = ch.skills[skill as keyof typeof ch.skills]
-                    const base   = abilityModifier(ch.ability_scores[ability])
+                    const prof   = false
+                    const base   = abilityModifier(attrs[ability])
                     const total  = base + (prof ? proficiencyBonus(ch.level) : 0)
                     const label  = skill.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())
                     return (
@@ -730,9 +748,9 @@ export default function CharacterSheet(): React.ReactElement {
 
             {activeTab === 'spells' && (
               <SpellSlotsPanel
-                slots={ch.spell_slots}
+                slots={[]}
                 edit={editMode}
-                onChange={(slots) => draft && setDraft({ ...draft, spell_slots: slots })}
+                onChange={() => undefined}
               />
             )}
 
@@ -757,14 +775,14 @@ export default function CharacterSheet(): React.ReactElement {
               <label className="label-rune">Notes</label>
               {editMode && draft ? (
                 <textarea
-                  value={draft.notes}
+                  value={draft.notes ?? ''}
                   onChange={(e) => setDraft({ ...draft, notes: e.target.value })}
                   className="input-dark resize-none h-24 text-sm"
                   placeholder="Session notes, quest reminders…"
                 />
               ) : (
                 <p className="text-slate-400 text-sm font-serif italic whitespace-pre-wrap leading-relaxed">
-                  {ch.notes || 'No notes yet.'}
+                  {ch.notes ?? 'No notes yet.'}
                 </p>
               )}
             </div>

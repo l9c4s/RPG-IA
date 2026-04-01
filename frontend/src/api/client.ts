@@ -1,5 +1,5 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios'
-import type { ApiError } from './types'
+import type { ApiError } from '../types'
 
 // ─── Axios instance ────────────────────────────────────────────────────────
 export const apiClient = axios.create({
@@ -13,7 +13,8 @@ export const apiClient = axios.create({
 // ─── Request interceptor: attach Bearer token ──────────────────────────────
 apiClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
-    const token = localStorage.getItem('access_token')
+    const raw = localStorage.getItem('access_token')
+    const token = raw ? (JSON.parse(raw) as string) : null
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`
     }
@@ -44,7 +45,8 @@ export const apiClientMultipart = axios.create({
 
 apiClientMultipart.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
-    const token = localStorage.getItem('access_token')
+    const raw = localStorage.getItem('access_token')
+    const token = raw ? (JSON.parse(raw) as string) : null
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`
       // Let browser set Content-Type with boundary for multipart
@@ -67,7 +69,7 @@ apiClientMultipart.interceptors.response.use(
   },
 )
 
-// ─── Typed API helpers ─────────────────────────────────────────────────────
+// ─── Legacy typed API helpers (kept for backwards compatibility) ───────────
 export const api = {
   get:    <T>(url: string, params?: Record<string, unknown>) =>
     apiClient.get<T>(url, { params }).then((r) => r.data),

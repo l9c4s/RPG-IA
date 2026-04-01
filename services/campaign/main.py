@@ -1,5 +1,6 @@
 import os
 import asyncio
+import json
 import logging
 from contextlib import asynccontextmanager
 from typing import Any
@@ -7,9 +8,12 @@ from uuid import UUID, uuid4
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, Depends, HTTPException, WebSocket, WebSocketDisconnect, status
+from fastapi import FastAPI, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, status
+import jwt as pyjwt
 from fastapi.middleware.cors import CORSMiddleware
-from langchain.vectorstores.base import VectorStoreRetriever
+from langchain_core.vectorstores import VectorStoreRetriever
+from langchain_openai import ChatOpenAI
+from pydantic import BaseModel, Field
 from langchain_community.vectorstores import PGVector
 from sqlalchemy import select, insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,6 +28,7 @@ from database import (
 from gm_chain import build_gm_chain, get_embeddings
 from models import (
     CampaignCreate,
+    CampaignStatusUpdate,
     GMResponse,
     PlayerAction,
     RollResult,
@@ -41,9 +46,10 @@ logger = logging.getLogger(__name__)
 # Configuration
 # ---------------------------------------------------------------------------
 
-TTS_SERVICE_URL: str = os.getenv("TTS_SERVICE_URL", "http://localhost:8003")
-IMAGE_SERVICE_URL: str = os.getenv("IMAGE_SERVICE_URL", "http://localhost:8004")
-KNOWLEDGE_SERVICE_URL: str = os.getenv("KNOWLEDGE_SERVICE_URL", "http://localhost:8001")
+TTS_SERVICE_URL: str = os.getenv("TTS_SERVICE_URL", "http://tts_service:8005")
+IMAGE_SERVICE_URL: str = os.getenv("IMAGE_SERVICE_URL", "http://image_service:8004")
+KNOWLEDGE_SERVICE_URL: str = os.getenv("KNOWLEDGE_SERVICE_URL", "http://pdf_service:8001")
+CHARACTER_SERVICE_URL: str = os.getenv("CHARACTER_SERVICE_URL", "http://character_service:8003")
 VECTOR_DB_URL: str = os.getenv(
     "VECTOR_DB_URL",
     "postgresql+psycopg2://rpg:rpg@localhost:5432/rpg_campaign",
@@ -202,6 +208,36 @@ async def _save_message(
     await db.execute(stmt)
 
 
+async def _fetch_campaign_characters(campaign_id: UUID) -> list[dict[str, Any]]:
+    characters: list[dict[str, Any]] = []
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{CHARACTER_SERVICE_URL}/campaigns/{campaign_id}/characters"
+            )
+            if resp.status_code == 200:
+                characters = resp.json()
+            else:
+                logger.error(
+                    "Character service returned %s for campaign=%s",
+                    resp.status_code,
+                    campaign_id,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Não foi possível validar os personagens da campanha.",
+                )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Falha ao contactar serviço de personagens: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Serviço de personagens indisponível.",
+        )
+    return characters
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -352,8 +388,13 @@ async def session_action(
 # ---------------------------------------------------------------------------
 
 
-@app.websocket("/ws/{session_id}")
-async def websocket_endpoint(session_id: str, ws: WebSocket) -> None:
+@app.websocket("/ws/session/{session_id}/player/{player_id}")
+async def websocket_endpoint(
+    session_id: str,
+    player_id: str,
+    ws: WebSocket,
+    token: str = Query(...),
+) -> None:
     """
     WebSocket endpoint for real-time multiplayer.
 
@@ -361,6 +402,14 @@ async def websocket_endpoint(session_id: str, ws: WebSocket) -> None:
     GM responses as they happen. Clients may also send JSON messages
     which are broadcast to all other participants in the same session.
     """
+    # Validate JWT token
+    jwt_secret = os.getenv("JWT_SECRET", "")
+    try:
+        pyjwt.decode(token, jwt_secret, algorithms=["HS256"])
+    except pyjwt.PyJWTError:
+        await ws.close(code=4001)
+        return
+
     await manager.connect(session_id, ws)
     try:
         while True:
@@ -380,6 +429,28 @@ async def websocket_endpoint(session_id: str, ws: WebSocket) -> None:
 # ---------------------------------------------------------------------------
 
 
+@app.get("/campaigns", status_code=status.HTTP_200_OK)
+async def list_campaigns(db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]]:
+    """Lista todas as campanhas."""
+    from sqlalchemy import select as sa_select
+    result = await db.execute(sa_select(CampaignDB).order_by(CampaignDB.created_at.desc()))
+    campaigns = result.scalars().all()
+    return [
+        {
+            "id": str(c.id),
+            "title": c.title,
+            "description": c.description,
+            "rpg_system": c.rpg_system,
+            "difficulty": c.difficulty,
+            "tone": c.tone,
+            "status": c.status,
+            "created_at": c.created_at.isoformat(),
+            "updated_at": getattr(c, "updated_at", c.created_at).isoformat(),
+        }
+        for c in campaigns
+    ]
+
+
 @app.post("/campaigns", status_code=status.HTTP_201_CREATED)
 async def create_campaign(
     payload: CampaignCreate,
@@ -393,6 +464,7 @@ async def create_campaign(
         rpg_system=payload.rpg_system,
         difficulty=payload.difficulty,
         tone=payload.tone,
+        status="lobby",
     )
     db.add(campaign)
     await db.flush()
@@ -404,8 +476,11 @@ async def create_campaign(
         "rpg_system": campaign.rpg_system,
         "difficulty": campaign.difficulty,
         "tone": campaign.tone,
+        "status": campaign.status,
         "created_at": campaign.created_at.isoformat(),
+        "updated_at": getattr(campaign, "updated_at", campaign.created_at).isoformat(),
     }
+
 
 
 @app.get("/campaigns/{campaign_id}", status_code=status.HTTP_200_OK)
@@ -427,13 +502,374 @@ async def get_campaign(
         "rpg_system": campaign.rpg_system,
         "difficulty": campaign.difficulty,
         "tone": campaign.tone,
+        "status": campaign.status,
         "created_at": campaign.created_at.isoformat(),
+        "updated_at": getattr(campaign, "updated_at", campaign.created_at).isoformat(),
     }
+
+
+# ---------------------------------------------------------------------------
+# Lobby endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.get("/campaigns/{campaign_id}/lobby", status_code=status.HTTP_200_OK)
+async def get_lobby(
+    campaign_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Retorna o estado do lobby: campanha + personagens + se pode iniciar."""
+    campaign = await db.get(CampaignDB, campaign_id)
+    if campaign is None:
+        raise HTTPException(status_code=404, detail="Campanha não encontrada.")
+
+    characters: list[dict] = []
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{CHARACTER_SERVICE_URL}/campaigns/{campaign_id}/characters"
+            )
+            if resp.status_code == 200:
+                characters = resp.json()
+    except Exception:
+        pass  # character service unavailable — lobby still loads
+
+    return {
+        "campaign": {
+            "id": str(campaign.id),
+            "title": campaign.title,
+            "description": campaign.description,
+            "rpg_system": campaign.rpg_system,
+            "difficulty": campaign.difficulty,
+            "status": campaign.status,
+            "created_at": campaign.created_at.isoformat(),
+            "updated_at": getattr(campaign, "updated_at", campaign.created_at).isoformat(),
+        },
+        "characters": characters,
+        "can_start": len(characters) >= 2,
+    }
+
+
+@app.patch("/campaigns/{campaign_id}/status", status_code=status.HTTP_200_OK)
+async def update_campaign_status(
+    campaign_id: UUID,
+    payload: CampaignStatusUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Altera o status da campanha. Para 'active', valida >= 2 personagens."""
+    campaign = await db.get(CampaignDB, campaign_id)
+    if campaign is None:
+        raise HTTPException(status_code=404, detail="Campanha não encontrada.")
+
+    if payload.status == "active":
+        characters = await _fetch_campaign_characters(campaign_id)
+        if len(characters) < 2:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"São necessários pelo menos 2 personagens para iniciar. Atualmente: {len(characters)}.",
+            )
+
+    campaign.status = payload.status
+    await db.commit()
+    await db.refresh(campaign)
+    return {"id": str(campaign.id), "status": campaign.status}
+
+
+# AI archetypes for auto-generated companions
+_AI_ARCHETYPES = [
+    {"name": "Aria", "class": "Bard", "race": "Half-Elf", "personality": "Curious and witty, loves stories and lore", "backstory": "A wandering bard collecting tales from across the realms."},
+    {"name": "Gorak", "class": "Barbarian", "race": "Half-Orc", "personality": "Fierce but loyal, speaks little and acts much", "backstory": "A former gladiator seeking redemption through honorable battle."},
+    {"name": "Sylvara", "class": "Wizard", "race": "Elf", "personality": "Analytical and cautious, always planning ahead", "backstory": "An elven scholar banished from her tower for forbidden research."},
+    {"name": "Brother Aldric", "class": "Cleric", "race": "Human", "personality": "Compassionate and devout, never abandons the wounded", "backstory": "A traveling healer ministering to those caught between wars."},
+    {"name": "Nimble", "class": "Rogue", "race": "Halfling", "personality": "Cheerful and opportunistic, trouble finds them naturally", "backstory": "A former street thief turned reluctant adventurer."},
+]
+
+
+@app.post("/campaigns/{campaign_id}/ai-player", status_code=status.HTTP_201_CREATED)
+async def add_ai_player(
+    campaign_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Adiciona um companheiro de IA à campanha."""
+    import random
+
+    campaign = await db.get(CampaignDB, campaign_id)
+    if campaign is None:
+        raise HTTPException(status_code=404, detail="Campanha não encontrada.")
+
+    archetype = random.choice(_AI_ARCHETYPES)
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{CHARACTER_SERVICE_URL}/characters",
+                json={
+                    "name": archetype["name"],
+                    "class": archetype["class"],
+                    "race": archetype["race"],
+                    "char_type": "ai_companion",
+                    "backstory": archetype["backstory"],
+                    "campaign_id": str(campaign_id),
+                    "level": 1,
+                },
+            )
+            if resp.status_code not in (200, 201):
+                raise HTTPException(status_code=500, detail="Falha ao criar personagem de IA.")
+            return resp.json()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Erro ao adicionar IA: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# 8-bit character generation
+# ---------------------------------------------------------------------------
+
+
+class Generate8BitCharacterRequest(BaseModel):
+    description: str = Field(..., min_length=1, max_length=2000)
+
+
+class Generated8BitCharacter(BaseModel):
+    name: str
+    race: str
+    character_class: str = Field(alias="class")
+    alignment: str
+    background: str
+    appearance: str
+    backstory: str
+    pixel_art_prompt: str
+
+    model_config = {"populate_by_name": True}
+
+
+@app.post(
+    "/campaigns/{campaign_id}/generate-character-8bit",
+    response_model=Generated8BitCharacter,
+    status_code=status.HTTP_200_OK,
+    summary="Gerar personagem 8-bit via LangChain",
+)
+async def generate_character_8bit(
+    campaign_id: UUID,
+    payload: Generate8BitCharacterRequest,
+    db: AsyncSession = Depends(get_db),
+) -> Generated8BitCharacter:
+    campaign = await db.get(CampaignDB, campaign_id)
+    if campaign is None:
+        raise HTTPException(status_code=404, detail="Campanha não encontrada.")
+
+    prompt = (
+        "You are a prompt engineer for 8-bit pixel art RPG characters. "
+        "Convert the short description below into a compact character concept and a DALL-E prompt. "
+        "Return ONLY valid JSON with these fields: name, race, class, alignment, background, appearance, backstory, pixel_art_prompt. "
+        "Do not add any explanation, markdown or extra text.\n\n"
+        f"Description: {payload.description}"
+    )
+
+    llm = ChatOpenAI(model="gpt-4o", temperature=0.8)
+    try:
+        result = await asyncio.to_thread(llm.invoke, prompt)
+        raw = result.content.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            trimmed = raw[raw.find("{"): raw.rfind("}") + 1]
+            parsed = json.loads(trimmed)
+    except Exception as exc:
+        logger.exception("Falha ao gerar personagem 8-bit: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Erro ao gerar a descrição 8-bit do personagem. Tente novamente.",
+        )
+
+    return Generated8BitCharacter.model_validate(parsed)
+
+
+# ---------------------------------------------------------------------------
+# Map generation
+# ---------------------------------------------------------------------------
+
+
+@app.post("/campaigns/{campaign_id}/generate-map", status_code=status.HTTP_200_OK)
+async def generate_map(
+    campaign_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """
+    Gera 6 locais para o mapa da campanha usando GPT-4o e salva no banco.
+    Requer pelo menos 1 personagem criado.
+    Ao final, seta o status da campanha para 'active'.
+    """
+    import json
+
+    campaign = await db.get(CampaignDB, campaign_id)
+    if campaign is None:
+        raise HTTPException(status_code=404, detail="Campanha não encontrada.")
+
+    # Valida que há pelo menos 1 personagem
+    char_count = 0
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{CHARACTER_SERVICE_URL}/campaigns/{campaign_id}/characters")
+            if resp.status_code == 200:
+                char_count = len(resp.json())
+    except Exception:
+        pass  # se o serviço estiver indisponível, libera
+
+    if char_count < 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Crie pelo menos 1 personagem antes de gerar o mapa.",
+        )
+
+    # Gera locais com GPT-4o via LangChain
+    from langchain_openai import ChatOpenAI
+
+    llm = ChatOpenAI(model="gpt-4o", temperature=0.85)
+
+    prompt = (
+        f"You are a fantasy world builder for a tabletop RPG campaign.\n"
+        f"Campaign: \"{campaign.title}\"\n"
+        f"System: {campaign.rpg_system}\n"
+        f"Description: {campaign.description or 'A classic adventure'}\n"
+        f"Tone: {campaign.tone}\n\n"
+        f"Create exactly 6 distinct, interesting locations for this campaign world.\n"
+        f"Return ONLY a valid JSON array — no markdown, no extra text — with 6 objects, each containing:\n"
+        f'  "id": unique string like "loc_1",\n'
+        f'  "name": evocative location name,\n'
+        f'  "description": 1-2 sentence description,\n'
+        f'  "x": number 5-95 (horizontal position on map),\n'
+        f'  "y": number 5-95 (vertical position on map),\n'
+        f'  "type": one of "city", "dungeon", "wilderness", "landmark", "unknown",\n'
+        f'  "is_current": true only for the first location,\n'
+        f'  "discovered": true for the first 2 locations, false for the rest.\n'
+        f"Spread locations across the full map area. Vary location types."
+    )
+
+    try:
+        result = await asyncio.to_thread(llm.invoke, prompt)
+        raw = result.content.strip()
+        # remove possível bloco markdown
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        locations: list[dict] = json.loads(raw)
+    except Exception as exc:
+        logger.exception("Falha ao gerar mapa: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Erro ao gerar o mapa da campanha. Tente novamente.",
+        )
+
+    campaign.locations_json = json.dumps(locations)
+    campaign.status = "active"
+    await db.commit()
+
+    return {"locations": locations}
+
+
+@app.get("/campaigns/{campaign_id}/locations", status_code=status.HTTP_200_OK)
+async def get_locations(
+    campaign_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> list[dict[str, Any]]:
+    """Retorna os locais gerados para o mapa da campanha."""
+    import json
+
+    campaign = await db.get(CampaignDB, campaign_id)
+    if campaign is None:
+        raise HTTPException(status_code=404, detail="Campanha não encontrada.")
+
+    if not campaign.locations_json:
+        return []
+
+    return json.loads(campaign.locations_json)
+
+
+# ---------------------------------------------------------------------------
+# Delete campaign
+# ---------------------------------------------------------------------------
+
+
+@app.delete("/campaigns/{campaign_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_campaign(
+    campaign_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Apaga uma campanha e todas as sessões e mensagens relacionadas."""
+    from sqlalchemy import delete as sa_delete, select as sa_select
+
+    campaign = await db.get(CampaignDB, campaign_id)
+    if campaign is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Campanha não encontrada.",
+        )
+
+    # Apaga mensagens → sessões → campanha (respeita FK)
+    sessions_result = await db.execute(
+        sa_select(SessionDB).where(SessionDB.campaign_id == campaign_id)
+    )
+    session_ids = [s.id for s in sessions_result.scalars().all()]
+
+    if session_ids:
+        await db.execute(
+            sa_delete(SessionMessageDB).where(SessionMessageDB.session_id.in_(session_ids))
+        )
+        await db.execute(
+            sa_delete(SessionDB).where(SessionDB.campaign_id == campaign_id)
+        )
+
+    await db.delete(campaign)
+    await db.commit()
 
 
 # ---------------------------------------------------------------------------
 # Session routes
 # ---------------------------------------------------------------------------
+
+
+@app.post("/campaigns/{campaign_id}/sessions/start", status_code=status.HTTP_201_CREATED)
+async def start_campaign_session(
+    campaign_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Start a new game session for an existing campaign."""
+    campaign = await db.get(CampaignDB, campaign_id)
+    if campaign is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Campanha não encontrada.",
+        )
+
+    if campaign.status != "active":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A campanha deve estar ativa para iniciar a sessão.",
+        )
+
+    characters = await _fetch_campaign_characters(campaign_id)
+    if len(characters) < 2:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"São necessários pelo menos 2 personagens para iniciar. Atualmente: {len(characters)}.",
+        )
+
+    session = SessionDB(id=uuid4(), campaign_id=campaign_id)
+    db.add(session)
+    await db.flush()
+    await db.refresh(session)
+    return {
+        "id": str(session.id),
+        "campaign_id": str(session.campaign_id),
+        "started_at": session.started_at.isoformat(),
+    }
 
 
 @app.post("/sessions", status_code=status.HTTP_201_CREATED)
@@ -447,6 +883,19 @@ async def create_session(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Campanha não encontrada.",
+        )
+
+    if campaign.status != "active":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A campanha deve estar ativa para iniciar a sessão.",
+        )
+
+    characters = await _fetch_campaign_characters(payload.campaign_id)
+    if len(characters) < 2:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"São necessários pelo menos 2 personagens para iniciar. Atualmente: {len(characters)}.",
         )
 
     session = SessionDB(id=uuid4(), campaign_id=payload.campaign_id)

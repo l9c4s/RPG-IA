@@ -64,8 +64,8 @@ class PdfSourceResponse(BaseModel):
     processed: bool
     chunk_count: int
     error_msg: str | None
-    created_at: str | None
-    updated_at: str | None
+    created_at: datetime | None
+    updated_at: datetime | None
 
 
 class PdfSourceListResponse(BaseModel):
@@ -116,5 +116,6 @@ class KnowledgeStatsResponse(BaseModel):
     total_chunks: int
     gm_is_ready: bool
     total_systems: int
-    sistemas_cobertos: list[str | None]
+    systems_covered: list[str]
     total_sources: int
+    processing_count: int

@@ -268,7 +268,7 @@ def process_pdf(self, source_id: str) -> dict[str, Any]:  # type: ignore[overrid
                         (id, source_id, chunk_index, content, rpg_system, embedding, token_count)
                     VALUES
                         (:id, :source_id, :chunk_index, :content, :rpg_system,
-                         :embedding::vector, :token_count)
+                         CAST(:embedding AS vector), :token_count)
                     """
                 ),
                 sub_batch,
