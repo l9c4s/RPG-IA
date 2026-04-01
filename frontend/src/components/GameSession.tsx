@@ -3,17 +3,19 @@ import React, {
 } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
-  Send, Wifi, WifiOff, Loader2, AlertTriangle, Users,
+  Send, Wifi, WifiOff, AlertTriangle, Users,
   Map, BookOpen, ChevronLeft, Dice1, Dice6, Volume2,
   Image as ImageIcon, Heart, Shield, Zap, X
 } from 'lucide-react'
 import { api } from '../api/client'
 import { useAuth } from '../hooks/useAuth'
 import { useWebSocket } from '../hooks/useWebSocket'
+import { Spinner } from './ui/Spinner'
+import { Badge } from './ui/Badge'
 import type {
   ChatMessage, Character, CharacterStatus, WSMessage,
   GMResponse, PlayerAction, DiceRoll, StateUpdate, Campaign
-} from '../api/types'
+} from '../types'
 import WorldMap from './WorldMap'
 
 // ─── Connection indicator ──────────────────────────────────────────────────
@@ -36,7 +38,7 @@ function ConnectionBadge({ status }: { status: ConnStatus }): React.ReactElement
       ) : status === 'error' || status === 'disconnected' ? (
         <WifiOff className="w-3.5 h-3.5" />
       ) : (
-        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+        <Spinner size="sm" />
       )}
       <span className={cfg.pulse ? 'animate-pulse' : ''}>{cfg.label}</span>
     </div>
@@ -422,7 +424,7 @@ export default function GameSession(): React.ReactElement {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
-          <Loader2 className="w-10 h-10 text-amber-600 animate-spin" />
+          <Spinner size="lg" />
           <p className="text-amber-500 font-serif italic animate-pulse">
             The dungeon master prepares the scene…
           </p>
@@ -576,7 +578,7 @@ export default function GameSession(): React.ReactElement {
                 title="Send action (Enter)"
               >
                 {isSending ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <Spinner size="sm" />
                 ) : (
                   <Send className="w-4 h-4" />
                 )}

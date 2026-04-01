@@ -6,12 +6,15 @@ import {
   Navigate,
   Outlet,
 } from 'react-router-dom'
+import { AuthProvider } from './contexts/AuthContext'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { useAuth } from './hooks/useAuth'
 
 // ── Lazy page imports ──────────────────────────────────────────────────────
 const Login          = lazy(() => import('./pages/Login'))
 const Register       = lazy(() => import('./pages/Register'))
 const Dashboard      = lazy(() => import('./pages/Dashboard'))
+const Lobby          = lazy(() => import('./pages/Lobby'))
 const GameSession    = lazy(() => import('./components/GameSession'))
 const CharacterSheet = lazy(() => import('./components/CharacterSheet'))
 const KnowledgeGate  = lazy(() => import('./components/KnowledgeGate'))
@@ -73,6 +76,7 @@ function AppRoutes(): React.ReactElement {
         {/* Protected routes */}
         <Route element={<RequireAuth />}>
           <Route path="/dashboard"                      element={<Dashboard />} />
+          <Route path="/lobby/:id"                      element={<Lobby />} />
           <Route path="/campaign/:id"                   element={<GameSession />} />
           <Route path="/campaign/:id/characters"        element={<CharacterSheet />} />
           <Route path="/knowledge"                      element={<KnowledgeGate />} />
@@ -101,10 +105,15 @@ function AppRoutes(): React.ReactElement {
   )
 }
 
+// ── Root App ───────────────────────────────────────────────────────────────
 export default function App(): React.ReactElement {
   return (
-    <BrowserRouter>
-      <AppRoutes />
-    </BrowserRouter>
+    <ErrorBoundary>
+      <BrowserRouter>
+        <AuthProvider>
+          <AppRoutes />
+        </AuthProvider>
+      </BrowserRouter>
+    </ErrorBoundary>
   )
 }

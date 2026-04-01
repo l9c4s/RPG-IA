@@ -1,12 +1,12 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import type { WSMessage, WSMessageType } from '../api/types'
+import type { WSMessage, WSMessageType } from '../types'
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error' | 'reconnecting'
 
 interface UseWebSocketOptions {
-  onMessage?: (message: WSMessage) => void
-  reconnectInterval?: number
-  maxReconnectAttempts?: number
+  onMessage?:             (message: WSMessage) => void
+  reconnectInterval?:     number
+  maxReconnectAttempts?:  number
 }
 
 interface UseWebSocketReturn {
@@ -38,7 +38,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketRet
   // Keep callback ref fresh without re-triggering effects
   useEffect(() => { onMessageRef.current = onMessage }, [onMessage])
 
-  const [status, setStatus]    = useState<ConnectionStatus>('disconnected')
+  const [status,    setStatus]    = useState<ConnectionStatus>('disconnected')
   const [lastError, setLastError] = useState<string | null>(null)
 
   // ── Cleanup helpers ──────────────────────────────────────────────────────

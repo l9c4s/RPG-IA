@@ -1,18 +1,26 @@
-import React, { useState, useEffect, useRef, useCallback, DragEvent, ChangeEvent } from 'react'
+import React, { useState, useEffect, useRef, useCallback, type DragEvent, type ChangeEvent } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  BookOpen, Upload, CheckCircle, XCircle, Loader2, RefreshCw,
+  BookOpen, Upload, CheckCircle, XCircle, RefreshCw,
   ChevronLeft, AlertTriangle, Database, FileText, Sword, Clock, Trash2
 } from 'lucide-react'
 import { api } from '../api/client'
 import { useAuth } from '../hooks/useAuth'
-import type { KnowledgeStats, PDFSource, PDFSourceType, ProcessingStatus } from '../api/types'
+import { Button } from './ui/Button'
+import { Badge } from './ui/Badge'
+import { Spinner } from './ui/Spinner'
+import { SkeletonTable } from './ui/Skeleton'
+import type { KnowledgeStats, PDFSource, PDFSourceType, ProcessingStatus } from '../types'
+import { RPG_SYSTEMS } from '../lib/constants'
 
-const RPG_SYSTEMS = [
-  'D&D 5e', 'Pathfinder 2e', 'Call of Cthulhu', 'Cyberpunk RED',
-  'Vampire: The Masquerade', 'Shadowrun', 'GURPS', 'Fate Core',
-  'Blades in the Dark', 'Generic / Other',
-]
+const EXTRA_RPG_SYSTEMS = [
+  ...RPG_SYSTEMS,
+  'Cyberpunk RED',
+  'GURPS',
+  'Fate Core',
+  'Blades in the Dark',
+  'Generic / Other',
+] as const
 
 const SOURCE_TYPES: { value: PDFSourceType; label: string }[] = [
   { value: 'rulebook',   label: 'Core Rulebook' },
@@ -22,11 +30,11 @@ const SOURCE_TYPES: { value: PDFSourceType; label: string }[] = [
   { value: 'homebrew',   label: 'Homebrew' },
 ]
 
-const STATUS_ICONS: Record<ProcessingStatus, React.ReactNode> = {
-  pending:    <Clock     className="w-4 h-4 text-slate-500" />,
-  processing: <Loader2   className="w-4 h-4 text-amber-400 animate-spin" />,
-  done:       <CheckCircle className="w-4 h-4 text-green-500" />,
-  error:      <XCircle   className="w-4 h-4 text-red-500" />,
+const STATUS_BADGE_VARIANT: Record<ProcessingStatus, 'default' | 'success' | 'warning' | 'danger' | 'info'> = {
+  pending:    'default',
+  processing: 'warning',
+  done:       'success',
+  error:      'danger',
 }
 
 const STATUS_LABELS: Record<ProcessingStatus, string> = {
@@ -34,6 +42,13 @@ const STATUS_LABELS: Record<ProcessingStatus, string> = {
   processing: 'Processing…',
   done:       'Ready',
   error:      'Error',
+}
+
+function StatusIcon({ status }: { status: ProcessingStatus }): React.ReactElement {
+  if (status === 'pending')    return <Clock      className="w-4 h-4 text-slate-500" />
+  if (status === 'processing') return <Spinner    size="sm" />
+  if (status === 'done')       return <CheckCircle className="w-4 h-4 text-green-500" />
+  return <XCircle className="w-4 h-4 text-red-500" />
 }
 
 // ── Stats Panel ────────────────────────────────────────────────────────────
@@ -49,7 +64,7 @@ function StatsPanel({ stats, isLoading }: StatsPanelProps): React.ReactElement {
 
       {isLoading ? (
         <div className="flex items-center gap-2 text-slate-400 text-sm">
-          <Loader2 className="w-4 h-4 animate-spin" />
+          <Spinner size="sm" />
           Loading stats…
         </div>
       ) : stats ? (
@@ -60,7 +75,9 @@ function StatsPanel({ stats, isLoading }: StatsPanelProps): React.ReactElement {
               ? 'bg-green-900/30 border-green-700/50'
               : 'bg-red-900/30 border-red-700/50'
           }`}>
-            <div className={`w-3 h-3 rounded-full ${stats.gm_is_ready ? 'bg-green-500' : 'bg-red-500'} ${stats.gm_is_ready ? 'shadow-lg shadow-green-500/50' : 'shadow-lg shadow-red-500/50'} animate-pulse-slow`} />
+            <div className={`w-3 h-3 rounded-full ${
+              stats.gm_is_ready ? 'bg-green-500' : 'bg-red-500'
+            } ${stats.gm_is_ready ? 'shadow-lg shadow-green-500/50' : 'shadow-lg shadow-red-500/50'} animate-pulse-slow`} />
             <div>
               <p className={`text-sm font-semibold ${stats.gm_is_ready ? 'text-green-300' : 'text-red-300'}`}>
                 {stats.gm_is_ready ? 'GM is Ready' : 'GM Needs More Knowledge'}
@@ -95,9 +112,7 @@ function StatsPanel({ stats, isLoading }: StatsPanelProps): React.ReactElement {
               <p className="text-xs text-slate-500 uppercase tracking-widest mb-2 font-serif">Systems Covered</p>
               <div className="flex flex-wrap gap-1.5">
                 {stats.systems_covered.map((sys) => (
-                  <span key={sys} className="badge-info">
-                    {sys}
-                  </span>
+                  <Badge key={sys} variant="info">{sys}</Badge>
                 ))}
               </div>
             </div>
@@ -106,7 +121,7 @@ function StatsPanel({ stats, isLoading }: StatsPanelProps): React.ReactElement {
           {/* Processing notice */}
           {stats.processing_count > 0 && (
             <div className="flex items-center gap-2 text-amber-400 text-xs bg-amber-900/20 border border-amber-700/30 rounded-md px-3 py-2">
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              <Spinner size="sm" />
               {stats.processing_count} book{stats.processing_count > 1 ? 's' : ''} being processed…
             </div>
           )}
@@ -167,7 +182,6 @@ function UploadForm({ onSuccess }: UploadFormProps): React.ReactElement {
       formData.append('rpg_system',  rpgSystem)
       formData.append('source_type', sourceType)
 
-      // Simulate progress since we can't track multipart easily
       const progressInterval = setInterval(() => {
         setProgress((p) => Math.min(p + 8, 85))
       }, 400)
@@ -177,7 +191,6 @@ function UploadForm({ onSuccess }: UploadFormProps): React.ReactElement {
       clearInterval(progressInterval)
       setProgress(100)
 
-      // Reset form
       setTimeout(() => {
         setFile(null)
         setTitle('')
@@ -255,7 +268,7 @@ function UploadForm({ onSuccess }: UploadFormProps): React.ReactElement {
         <div className="mb-5 space-y-1.5">
           <div className="flex items-center justify-between text-xs text-slate-400">
             <span className="flex items-center gap-1">
-              <Loader2 className="w-3 h-3 animate-spin text-amber-500" />
+              <Spinner size="sm" />
               {progress < 100 ? 'Uploading and processing…' : 'Complete!'}
             </span>
             <span>{progress}%</span>
@@ -292,7 +305,7 @@ function UploadForm({ onSuccess }: UploadFormProps): React.ReactElement {
               className="input-dark"
               disabled={isUploading}
             >
-              {RPG_SYSTEMS.map((s) => (
+              {EXTRA_RPG_SYSTEMS.map((s) => (
                 <option key={s} value={s}>{s}</option>
               ))}
             </select>
@@ -312,17 +325,16 @@ function UploadForm({ onSuccess }: UploadFormProps): React.ReactElement {
           </div>
         </div>
 
-        <button
+        <Button
+          variant="primary"
+          isLoading={isUploading}
+          leftIcon={<Upload className="w-4 h-4" />}
+          disabled={!file}
           onClick={handleUpload}
-          disabled={!file || isUploading}
-          className="btn-primary w-full justify-center"
+          className="w-full justify-center"
         >
-          {isUploading ? (
-            <><Loader2 className="w-4 h-4 animate-spin" /> Processing…</>
-          ) : (
-            <><Upload className="w-4 h-4" /> Upload to Knowledge Bank</>
-          )}
-        </button>
+          {isUploading ? 'Processing…' : 'Upload to Knowledge Bank'}
+        </Button>
       </div>
     </div>
   )
@@ -337,11 +349,7 @@ interface SourceListProps {
 
 function SourceList({ sources, isLoading, onDelete }: SourceListProps): React.ReactElement {
   if (isLoading) {
-    return (
-      <div className="flex items-center gap-2 justify-center py-8 text-slate-400 text-sm">
-        <Loader2 className="w-4 h-4 animate-spin" /> Loading sources…
-      </div>
-    )
+    return <SkeletonTable rows={4} />
   }
 
   if (sources.length === 0) {
@@ -368,7 +376,9 @@ function SourceList({ sources, isLoading, onDelete }: SourceListProps): React.Re
               : 'border-slate-700/40'
           }`}
         >
-          <div className="shrink-0">{STATUS_ICONS[source.status]}</div>
+          <div className="shrink-0">
+            <StatusIcon status={source.status} />
+          </div>
 
           <div className="flex-1 min-w-0">
             <p className="text-slate-200 text-sm font-semibold truncate">{source.title}</p>
@@ -388,13 +398,9 @@ function SourceList({ sources, isLoading, onDelete }: SourceListProps): React.Re
             )}
           </div>
 
-          <span className={`text-xs shrink-0 ${
-            source.status === 'done' ? 'text-green-400' :
-            source.status === 'error' ? 'text-red-400' :
-            source.status === 'processing' ? 'text-amber-400' : 'text-slate-500'
-          }`}>
+          <Badge variant={STATUS_BADGE_VARIANT[source.status]} className="shrink-0 text-xs">
             {STATUS_LABELS[source.status]}
-          </span>
+          </Badge>
 
           <button
             onClick={() => onDelete(source.id)}
@@ -411,11 +417,11 @@ function SourceList({ sources, isLoading, onDelete }: SourceListProps): React.Re
 
 // ── Main Component ─────────────────────────────────────────────────────────
 export default function KnowledgeGate(): React.ReactElement {
-  const { user } = useAuth()
-  const [stats,     setStats]     = useState<KnowledgeStats | null>(null)
-  const [sources,   setSources]   = useState<PDFSource[]>([])
-  const [statsLoading,  setStatsLoading]  = useState(true)
-  const [sourcesLoading, setSourcesLoading] = useState(true)
+  const { user }                                    = useAuth()
+  const [stats,          setStats]                 = useState<KnowledgeStats | null>(null)
+  const [sources,        setSources]               = useState<PDFSource[]>([])
+  const [statsLoading,   setStatsLoading]          = useState(true)
+  const [sourcesLoading, setSourcesLoading]        = useState(true)
 
   const fetchAll = useCallback(async () => {
     setStatsLoading(true)
@@ -452,9 +458,9 @@ export default function KnowledgeGate(): React.ReactElement {
     try {
       await api.delete(`/books/${id}`)
       setSources((prev) => prev.filter((s) => s.id !== id))
-      void fetchAll() // Refresh stats
+      void fetchAll()
     } catch {
-      // Silently fail — user can retry
+      // Silently fail
     }
   }
 

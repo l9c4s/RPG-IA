@@ -1,5 +1,5 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios'
-import type { ApiError } from './types'
+import type { ApiError } from '../types'
 
 // ─── Axios instance ────────────────────────────────────────────────────────
 export const apiClient = axios.create({
@@ -67,7 +67,7 @@ apiClientMultipart.interceptors.response.use(
   },
 )
 
-// ─── Typed API helpers ─────────────────────────────────────────────────────
+// ─── Legacy typed API helpers (kept for backwards compatibility) ───────────
 export const api = {
   get:    <T>(url: string, params?: Record<string, unknown>) =>
     apiClient.get<T>(url, { params }).then((r) => r.data),

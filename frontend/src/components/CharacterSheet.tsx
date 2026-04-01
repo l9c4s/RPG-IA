@@ -2,14 +2,16 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
   ChevronLeft, Edit3, Save, X, Plus, Trash2,
-  Heart, Shield, Zap, Star, Users, Loader2, AlertCircle
+  Heart, Shield, Zap, Star, Users, AlertCircle
 } from 'lucide-react'
 import { api } from '../api/client'
 import { useAuth } from '../hooks/useAuth'
+import { Spinner } from './ui/Spinner'
+import { Badge } from './ui/Badge'
 import type {
   Character, AbilityScores, CharacterStatus, Condition,
   InventoryItem, SpellSlots, CharacterAbility
-} from '../api/types'
+} from '../types'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 function abilityModifier(score: number): number {
@@ -493,7 +495,7 @@ export default function CharacterSheet(): React.ReactElement {
   if (isLoading) {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center">
-        <Loader2 className="w-8 h-8 text-amber-600 animate-spin" />
+        <Spinner size="lg" />
       </div>
     )
   }
@@ -524,7 +526,7 @@ export default function CharacterSheet(): React.ReactElement {
                 <X className="w-3.5 h-3.5" /> Cancel
               </button>
               <button onClick={saveCharacter} disabled={isSaving} className="btn-primary py-1.5 text-xs">
-                {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                {isSaving ? <Spinner size="sm" /> : <Save className="w-3.5 h-3.5" />}
                 Save
               </button>
             </>

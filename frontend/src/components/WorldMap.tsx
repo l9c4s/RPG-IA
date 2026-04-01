@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { Map, Loader2, RefreshCw, Compass } from 'lucide-react'
 import { api } from '../api/client'
-import type { Location } from '../api/types'
+import type { Location } from '../types'
 
 // ─── Icon per location type ────────────────────────────────────────────────
 const TYPE_COLOR: Record<Location['type'], string> = {
