@@ -1,6 +1,7 @@
 // Test environment setup
 // This file is loaded before each test file.
 // Add global test utilities, mocks, and polyfills here.
+import '@testing-library/jest-dom'
 
 // Example: mock localStorage
 const localStorageMock = (() => {

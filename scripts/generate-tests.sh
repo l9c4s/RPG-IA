@@ -3,6 +3,9 @@
 [ -n "$CLAUDE_TEST_GEN" ] && exit 0
 export CLAUDE_TEST_GEN=1
 
+# Ensure Node/npm are available when invoked from hooks
+export PATH="/c/Program Files/nodejs:$PATH"
+
 # Find files changed since last commit (staged + unstaged + untracked src files)
 CHANGED=$(git diff --name-only HEAD 2>/dev/null; git diff --name-only 2>/dev/null; git ls-files --others --exclude-standard 2>/dev/null)
 

@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Sword, Plus, Book, Map, Users,
+  Sword, Plus, Book, Map, Users, Trash2,
   ChevronRight, AlertCircle, BookOpen, Clock,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
+import { campaignApi } from '../api/campaigns'
 import { useAuth } from '../hooks/useAuth'
 import { AppLayout } from '../components/layout/AppLayout'
 import { Button } from '../components/ui/Button'
@@ -19,13 +20,15 @@ import { RPG_SYSTEMS } from '../lib/constants'
 import { formatDate, truncate } from '../lib/utils'
 
 const STATUS_LABELS: Record<CampaignStatus, string> = {
+  lobby:     'Lobby',
   active:    'Active',
   paused:    'Paused',
   completed: 'Completed',
   archived:  'Archived',
 }
 
-const STATUS_BADGE_VARIANT: Record<CampaignStatus, 'success' | 'warning' | 'info' | 'danger'> = {
+const STATUS_BADGE_VARIANT: Record<CampaignStatus, 'success' | 'warning' | 'info' | 'danger' | 'default'> = {
+  lobby:     'default',
   active:    'success',
   paused:    'warning',
   completed: 'info',
@@ -135,8 +138,8 @@ function CreateCampaignForm({ onClose, onCreate }: CreateCampaignFormProps): Rea
 
 // ── Campaign Card ──────────────────────────────────────────────────────────
 interface CampaignCardProps {
-  campaign: Campaign
-  onDelete: (id: number) => Promise<void>
+  campaign:   Campaign
+  onDelete:   (id: string) => Promise<void>
   isDeleting: boolean
 }
 
@@ -187,7 +190,7 @@ function CampaignCard({ campaign, onDelete, isDeleting }: CampaignCardProps): Re
           variant="primary"
           size="sm"
           leftIcon={<Sword className="w-3.5 h-3.5" />}
-          onClick={() => navigate(`/campaign/${campaign.id}`)}
+          onClick={() => navigate(`/lobby/${campaign.id}`)}
           className="flex-1 justify-center"
         >
           Play
@@ -210,6 +213,16 @@ function CampaignCard({ campaign, onDelete, isDeleting }: CampaignCardProps): Re
         >
           <Map className="w-3.5 h-3.5" />
         </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          isLoading={isDeleting}
+          onClick={() => void onDelete(String(campaign.id))}
+          className="px-3 text-red-400 hover:text-red-300 hover:border-red-700/50"
+          title="Delete campaign"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </Button>
       </div>
     </div>
   )
@@ -218,11 +231,13 @@ function CampaignCard({ campaign, onDelete, isDeleting }: CampaignCardProps): Re
 // ── Main Dashboard ─────────────────────────────────────────────────────────
 export default function Dashboard(): React.ReactElement {
   const { user }                           = useAuth()
+  const navigate                           = useNavigate()
   const [campaigns,    setCampaigns]       = useState<Campaign[]>([])
   const [isLoading,    setIsLoading]       = useState(true)
   const [error,        setError]           = useState<string | null>(null)
   const [showCreate,   setShowCreate]      = useState(false)
   const [filterStatus, setFilterStatus]    = useState<CampaignStatus | 'all'>('all')
+  const [deletingId,   setDeletingId]      = useState<string | null>(null)
 
   const fetchCampaigns = useCallback(async () => {
     setIsLoading(true)
@@ -243,7 +258,7 @@ export default function Dashboard(): React.ReactElement {
     ? campaigns
     : campaigns.filter((c) => c.status === filterStatus)
 
-  async function handleDeleteCampaign(id: number): Promise<void> {
+  async function handleDeleteCampaign(id: string): Promise<void> {
     if (!window.confirm('Delete this campaign? This action cannot be undone.')) {
       return
     }
@@ -253,7 +268,7 @@ export default function Dashboard(): React.ReactElement {
 
     try {
       await campaignApi.delete(id)
-      setCampaigns((current) => current.filter((campaign) => campaign.id !== id))
+      setCampaigns((current) => current.filter((campaign) => String(campaign.id) !== id))
     } catch {
       setError('Unable to delete campaign. Please try again.')
     } finally {
@@ -286,7 +301,7 @@ export default function Dashboard(): React.ReactElement {
       {/* Filter tabs */}
       {campaigns.length > 0 && (
         <div className="flex gap-2 mb-6 flex-wrap">
-          {(['all', 'active', 'paused', 'completed', 'archived'] as const).map((s) => (
+          {(['all', 'lobby', 'active', 'paused', 'completed', 'archived'] as const).map((s) => (
             <button
               key={s}
               onClick={() => setFilterStatus(s)}
@@ -353,7 +368,12 @@ export default function Dashboard(): React.ReactElement {
       {!isLoading && filtered.length > 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {filtered.map((campaign) => (
-            <CampaignCard key={campaign.id} campaign={campaign} />
+            <CampaignCard
+              key={campaign.id}
+              campaign={campaign}
+              onDelete={handleDeleteCampaign}
+              isDeleting={deletingId === String(campaign.id)}
+            />
           ))}
         </div>
       )}

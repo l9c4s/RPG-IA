@@ -7,10 +7,9 @@ import {
 import { api } from '../api/client'
 import { useAuth } from '../hooks/useAuth'
 import { Spinner } from './ui/Spinner'
-import { Badge } from './ui/Badge'
 import type {
-  Character, CharacterStatus, CharacterAttributes, Condition,
-  InventoryItem, SpellSlots, CharacterAbility
+  Character, CharacterStatus, CharacterAttributes,
+  InventoryItem, CharacterAbility
 } from '../types'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
@@ -38,18 +37,20 @@ const ABILITY_SHORT: Record<AbilityKey, string> = {
 }
 
 const DEFAULT_STATUS: CharacterStatus = {
+  id: '', character_id: '', updated_at: '',
   hp_current: 0, hp_max: 0, hp_temp: 0,
   conditions: [], spell_slots: {}, exhaustion: 0,
   death_saves_success: 0, death_saves_failure: 0,
 }
 
 const DEFAULT_ATTRS: CharacterAttributes = {
+  id: '', character_id: '',
   strength: 10, dexterity: 10, constitution: 10,
   intelligence: 10, wisdom: 10, charisma: 10,
   armor_class: 10, initiative: 0, speed: 30,
 }
 
-const CONDITIONS: Condition[] = [
+const CONDITIONS: string[] = [
   'Blinded', 'Charmed', 'Deafened', 'Exhaustion', 'Frightened',
   'Grappled', 'Incapacitated', 'Invisible', 'Paralyzed', 'Petrified',
   'Poisoned', 'Prone', 'Restrained', 'Stunned', 'Unconscious',
@@ -187,13 +188,13 @@ function HpTracker({ status, edit, onChange }: HpTrackerProps): React.ReactEleme
 
 // ─── Conditions ────────────────────────────────────────────────────────────
 interface ConditionsPanelProps {
-  conditions: Condition[]
+  conditions: string[]
   edit:       boolean
-  onChange:   (c: Condition[]) => void
+  onChange:   (c: string[]) => void
 }
 
 function ConditionsPanel({ conditions, edit, onChange }: ConditionsPanelProps): React.ReactElement {
-  const toggle = (c: Condition) => {
+  const toggle = (c: string) => {
     if (conditions.includes(c)) onChange(conditions.filter((x) => x !== c))
     else onChange([...conditions, c])
   }
@@ -228,13 +229,15 @@ function ConditionsPanel({ conditions, edit, onChange }: ConditionsPanelProps): 
 
 // ─── Spell Slots ───────────────────────────────────────────────────────────
 interface SpellSlotsPanelProps {
-  slots:    SpellSlots[]
+  slots:    Record<string, number>
   edit:     boolean
-  onChange: (slots: SpellSlots[]) => void
+  onChange: (slots: Record<string, number>) => void
 }
 
 function SpellSlotsPanel({ slots, edit, onChange }: SpellSlotsPanelProps): React.ReactElement {
-  if (slots.length === 0 && !edit) {
+  const entries = Object.entries(slots).sort(([a], [b]) => Number(a) - Number(b))
+
+  if (entries.length === 0) {
     return (
       <div className="card-rune p-4">
         <h3 className="font-serif text-amber-400 text-sm tracking-wide mb-2">Spell Slots</h3>
@@ -247,41 +250,24 @@ function SpellSlotsPanel({ slots, edit, onChange }: SpellSlotsPanelProps): React
     <div className="card-rune p-4">
       <h3 className="font-serif text-amber-400 text-sm tracking-wide mb-3">Spell Slots</h3>
       <div className="space-y-2">
-        {slots.map((slot, idx) => {
-          const remaining = slot.total - slot.used
-          return (
-            <div key={slot.level} className="flex items-center gap-3">
-              <span className="text-slate-400 text-xs w-12 font-serif">Lvl {slot.level}</span>
-              <div className="flex gap-1 flex-wrap flex-1">
-                {Array.from({ length: slot.total }).map((_, i) => (
-                  <button
-                    key={i}
-                    disabled={!edit}
-                    onClick={() => {
-                      if (!edit) return
-                      const newSlots = [...slots]
-                      const s = { ...newSlots[idx] }
-                      if (i < slot.used) s.used = Math.max(0, s.used - 1)
-                      else s.used = Math.min(s.total, s.used + 1)
-                      newSlots[idx] = s
-                      onChange(newSlots)
-                    }}
-                    className={`w-5 h-5 rounded-full border-2 transition-all ${
-                      i < remaining
-                        ? 'bg-arcane-500 border-arcane-400'
-                        : 'bg-slate-800 border-slate-600'
-                    } ${edit ? 'cursor-pointer hover:border-purple-400' : 'cursor-default'}`}
-                    style={{
-                      backgroundColor: i < remaining ? 'rgb(124, 58, 237)' : undefined,
-                      borderColor:     i < remaining ? 'rgb(167, 139, 250)' : undefined,
-                    }}
-                  />
-                ))}
+        {entries.map(([level, remaining]) => (
+          <div key={level} className="flex items-center gap-3">
+            <span className="text-slate-400 text-xs w-14 font-serif">Level {level}</span>
+            <span className="text-slate-100 text-sm font-bold">{remaining}</span>
+            {edit && (
+              <div className="flex gap-1">
+                <button
+                  onClick={() => onChange({ ...slots, [level]: Math.max(0, remaining - 1) })}
+                  className="text-xs px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 hover:text-red-400"
+                >−</button>
+                <button
+                  onClick={() => onChange({ ...slots, [level]: remaining + 1 })}
+                  className="text-xs px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 hover:text-green-400"
+                >+</button>
               </div>
-              <span className="text-slate-500 text-xs">{remaining}/{slot.total}</span>
-            </div>
-          )
-        })}
+            )}
+          </div>
+        ))}
       </div>
     </div>
   )
@@ -297,10 +283,16 @@ interface InventoryPanelProps {
 function InventoryPanel({ items, edit, onChange }: InventoryPanelProps): React.ReactElement {
   function addItem(): void {
     const newItem: InventoryItem = {
-      id:       crypto.randomUUID(),
-      name:     'New Item',
-      quantity: 1,
-      equipped: false,
+      id:           crypto.randomUUID(),
+      character_id: '',
+      item_name:    'New Item',
+      item_type:    'misc',
+      quantity:     1,
+      weight:       0,
+      value_gp:     0,
+      properties:   {},
+      equipped:     false,
+      created_at:   new Date().toISOString(),
     }
     onChange([...items, newItem])
   }
@@ -334,8 +326,8 @@ function InventoryPanel({ items, edit, onChange }: InventoryPanelProps): React.R
                 <>
                   <input
                     type="text"
-                    value={item.name}
-                    onChange={(e) => updateItem(item.id, { name: e.target.value })}
+                    value={item.item_name}
+                    onChange={(e) => updateItem(item.id, { item_name: e.target.value })}
                     className="flex-1 bg-transparent text-slate-200 text-xs outline-none border-b border-transparent focus:border-amber-700"
                   />
                   <input
@@ -357,7 +349,7 @@ function InventoryPanel({ items, edit, onChange }: InventoryPanelProps): React.R
                 </>
               ) : (
                 <>
-                  <span className="flex-1 text-slate-200 text-xs truncate">{item.name}</span>
+                  <span className="flex-1 text-slate-200 text-xs truncate">{item.item_name}</span>
                   <span className="text-slate-500 text-xs">×{item.quantity}</span>
                   {item.equipped && <span className="badge badge-warning text-[10px]">E</span>}
                 </>
@@ -379,7 +371,11 @@ interface AbilitiesPanelProps {
 
 function AbilitiesPanel({ abilities, edit, onChange }: AbilitiesPanelProps): React.ReactElement {
   function addAbility(): void {
-    onChange([...abilities, { id: crypto.randomUUID(), name: 'New Ability', description: '', source: 'Class Feature' }])
+    onChange([...abilities, {
+      id: crypto.randomUUID(), character_id: '',
+      ability_name: 'New Ability', ability_type: 'feature',
+      description: null, spell_level: null, uses_max: null, uses_remaining: null, recharge: null,
+    }])
   }
 
   return (
@@ -401,29 +397,21 @@ function AbilitiesPanel({ abilities, edit, onChange }: AbilitiesPanelProps): Rea
               {edit ? (
                 <div className="space-y-1">
                   <input
-                    value={ab.name}
+                    value={ab.ability_name}
                     onChange={(e) => {
-                      const next = [...abilities]; next[idx] = { ...ab, name: e.target.value }; onChange(next)
+                      const next = [...abilities]; next[idx] = { ...ab, ability_name: e.target.value }; onChange(next)
                     }}
                     className="w-full bg-transparent text-amber-400 text-xs font-semibold outline-none border-b border-amber-700/40"
                   />
                   <textarea
-                    value={ab.description}
+                    value={ab.description ?? ''}
                     onChange={(e) => {
                       const next = [...abilities]; next[idx] = { ...ab, description: e.target.value }; onChange(next)
                     }}
                     className="w-full bg-transparent text-slate-300 text-xs resize-none outline-none"
                     rows={2}
                   />
-                  <div className="flex justify-between items-center">
-                    <input
-                      value={ab.source}
-                      onChange={(e) => {
-                        const next = [...abilities]; next[idx] = { ...ab, source: e.target.value }; onChange(next)
-                      }}
-                      className="bg-transparent text-slate-500 text-xs outline-none border-b border-transparent focus:border-slate-600 w-32"
-                      placeholder="Source"
-                    />
+                  <div className="flex justify-end">
                     <button onClick={() => onChange(abilities.filter((_, i) => i !== idx))} className="text-slate-600 hover:text-red-400">
                       <Trash2 className="w-3 h-3" />
                     </button>
@@ -431,9 +419,9 @@ function AbilitiesPanel({ abilities, edit, onChange }: AbilitiesPanelProps): Rea
                 </div>
               ) : (
                 <>
-                  <p className="text-amber-400 text-xs font-semibold font-serif">{ab.name}</p>
+                  <p className="text-amber-400 text-xs font-semibold font-serif">{ab.ability_name}</p>
                   <p className="text-slate-400 text-xs mt-0.5 leading-relaxed">{ab.description}</p>
-                  <p className="text-slate-600 text-xs mt-1">{ab.source}</p>
+                  <p className="text-slate-600 text-xs mt-1 capitalize">{ab.ability_type}</p>
                 </>
               )}
             </div>
@@ -597,7 +585,7 @@ export default function CharacterSheet(): React.ReactElement {
                     <h1 className="text-2xl font-serif text-amber-400">{ch.name}</h1>
                   )}
                   <p className="text-slate-400 text-sm font-serif">
-                    {ch.race}{ch.subrace ? ` (${ch.subrace})` : ''} ·{' '}
+                    {ch.race} ·{' '}
                     {ch.character_class}{ch.subclass ? ` (${ch.subclass})` : ''} ·{' '}
                     Level {ch.level}
                   </p>
@@ -699,21 +687,19 @@ export default function CharacterSheet(): React.ReactElement {
                   </div>
                 </div>
 
-                {/* Personality */}
-                <div className="card-rune p-4 grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                {/* Appearance & Backstory */}
+                <div className="card-rune p-4 grid grid-cols-1 gap-4 text-xs">
                   {([
-                    ['Personality Traits', 'personality_traits'],
-                    ['Ideals',             'ideals'],
-                    ['Bonds',              'bonds'],
-                    ['Flaws',              'flaws'],
-                  ] as const).map(([label, field]) => (
+                    ['Appearance', 'appearance'] as const,
+                    ['Backstory',  'backstory']  as const,
+                  ]).map(([label, field]) => (
                     <div key={field}>
                       <label className="label-rune">{label}</label>
                       {editMode && draft ? (
                         <textarea
-                          value={draft[field]}
+                          value={draft[field] ?? ''}
                           onChange={(e) => setDraft({ ...draft, [field]: e.target.value })}
-                          className="input-dark text-xs resize-none h-16"
+                          className="input-dark text-xs resize-none h-20"
                         />
                       ) : (
                         <p className="text-slate-400 font-serif italic leading-relaxed">{ch[field] || '—'}</p>
@@ -748,9 +734,9 @@ export default function CharacterSheet(): React.ReactElement {
 
             {activeTab === 'spells' && (
               <SpellSlotsPanel
-                slots={[]}
+                slots={stat.spell_slots}
                 edit={editMode}
-                onChange={() => undefined}
+                onChange={(s) => draft && setDraft({ ...draft, status: { ...(draft.status ?? DEFAULT_STATUS), spell_slots: s } })}
               />
             )}
 
@@ -770,22 +756,6 @@ export default function CharacterSheet(): React.ReactElement {
               />
             )}
 
-            {/* Notes */}
-            <div className="card-rune p-4">
-              <label className="label-rune">Notes</label>
-              {editMode && draft ? (
-                <textarea
-                  value={draft.notes ?? ''}
-                  onChange={(e) => setDraft({ ...draft, notes: e.target.value })}
-                  className="input-dark resize-none h-24 text-sm"
-                  placeholder="Session notes, quest reminders…"
-                />
-              ) : (
-                <p className="text-slate-400 text-sm font-serif italic whitespace-pre-wrap leading-relaxed">
-                  {ch.notes ?? 'No notes yet.'}
-                </p>
-              )}
-            </div>
           </div>
         )}
       </main>

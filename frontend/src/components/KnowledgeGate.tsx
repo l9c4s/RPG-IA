@@ -344,7 +344,7 @@ function UploadForm({ onSuccess }: UploadFormProps): React.ReactElement {
 interface SourceListProps {
   sources:   PDFSource[]
   isLoading: boolean
-  onDelete:  (id: number) => void
+  onDelete:  (id: string) => void
 }
 
 function SourceList({ sources, isLoading, onDelete }: SourceListProps): React.ReactElement {
@@ -455,9 +455,9 @@ export default function KnowledgeGate(): React.ReactElement {
     return () => clearInterval(interval)
   }, [sources, fetchAll])
 
-  async function handleDelete(id: number): Promise<void> {
+  async function handleDelete(id: string): Promise<void> {
     try {
-      await knowledgeApi.deleteSource(String(id))
+      await knowledgeApi.deleteSource(id)
       setSources((prev) => prev.filter((s) => s.id !== id))
       void fetchAll()
     } catch {

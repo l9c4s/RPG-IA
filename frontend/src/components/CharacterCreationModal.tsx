@@ -1,13 +1,12 @@
-import React, { useState } from 'react'
-import { Sword, Shield, User, ChevronRight, ChevronLeft, Check } from 'lucide-react'
+import React, { useState, useTransition } from 'react'
+import { Sword, Shield, User, ChevronRight, ChevronLeft, Check, Sparkles } from 'lucide-react'
 import { api } from '../api/client'
 import { Modal } from './ui/Modal'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
-import { Spinner } from './ui/Spinner'
 import type { Character } from '../types'
 import { RACES, CLASSES, ALIGNMENTS, STANDARD_ARRAY } from '../lib/constants'
-import { dndModifier, formatModifier } from '../lib/utils'
+import { formatModifier } from '../lib/utils'
 
 // ─── Step types ────────────────────────────────────────────────────────────
 interface BasicInfo {
@@ -35,6 +34,18 @@ interface PersonalityInfo {
 }
 
 type WizardStep = 1 | 2 | 3
+type WizardMode = 'select' | 'ai' | 'manual'
+
+interface AiGeneratedCharacter {
+  name:            string
+  race:            string
+  character_class: string
+  alignment:       string
+  background:      string
+  appearance:      string
+  backstory:       string
+  pixel_art_prompt: string
+}
 
 // ─── Step indicators ───────────────────────────────────────────────────────
 const STEPS = [
@@ -206,7 +217,6 @@ function Step2({ data, onChange, onNext, onBack }: Step2Props): React.ReactEleme
       <div className="grid grid-cols-3 gap-3">
         {ABILITY_FIELDS.map(({ key, label, short }) => {
           const score = data[key]
-          const mod   = dndModifier(score)
           return (
             <div key={key} className="stat-box p-3">
               <label className="text-amber-500 text-xs font-serif font-semibold tracking-widest block mb-1">
@@ -293,6 +303,101 @@ function Step3({ data, onChange, onBack, onSubmit, isLoading }: Step3Props): Rea
   )
 }
 
+// ─── AI Generation panel ──────────────────────────────────────────────────
+interface AiPanelProps {
+  campaignId:   string
+  onGenerated:  (basic: BasicInfo, persona: PersonalityInfo) => void
+  onBack:       () => void
+}
+
+function AiPanel({ campaignId, onGenerated, onBack }: AiPanelProps): React.ReactElement {
+  const [description,   setDescription]   = useState('')
+  const [isGenerating,  setIsGenerating]  = useState(false)
+  const [error,         setError]         = useState<string | null>(null)
+  const [,              startTransition]  = useTransition()
+
+  async function handleGenerate(): Promise<void> {
+    if (!description.trim()) { setError('Descreva como deve ser o personagem.'); return }
+    setIsGenerating(true)
+    setError(null)
+    try {
+      const result = await api.post<AiGeneratedCharacter>(
+        `/campaigns/${campaignId}/generate-character-8bit`,
+        { description: description.trim() },
+      )
+      startTransition(() => {
+        onGenerated(
+          {
+            name:            result.name,
+            race:            result.race,
+            character_class: result.character_class,
+            background:      result.background,
+            alignment:       result.alignment,
+          },
+          {
+            personality_traits: result.appearance,
+            ideals:             '',
+            bonds:              result.backstory,
+            flaws:              '',
+          },
+        )
+      })
+    } catch {
+      setError('Falha ao gerar personagem. Tente novamente.')
+      setIsGenerating(false)
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <p className="text-slate-400 text-sm font-serif italic">
+        Descreva o personagem em linguagem natural. A IA criará o conceito completo e pré-preencherá o formulário.
+      </p>
+
+      {error && (
+        <div className="text-red-300 text-sm bg-red-900/30 border border-red-700/40 rounded-md px-3 py-2">
+          {error}
+        </div>
+      )}
+
+      <div>
+        <label className="label-rune">Descrição do personagem</label>
+        <textarea
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="Um elfo renegado que fugiu de sua cidade natal depois de roubar um artefato proibido…"
+          className="input-dark resize-none h-28 text-sm"
+          maxLength={500}
+          autoFocus
+          disabled={isGenerating}
+        />
+        <p className="text-slate-600 text-xs mt-1 text-right">{description.length}/500</p>
+      </div>
+
+      <div className="flex gap-3 pt-1">
+        <Button
+          variant="ghost"
+          leftIcon={<ChevronLeft className="w-4 h-4" />}
+          onClick={onBack}
+          disabled={isGenerating}
+          className="flex-1 justify-center"
+        >
+          Voltar
+        </Button>
+        <Button
+          variant="primary"
+          leftIcon={isGenerating ? undefined : <Sparkles className="w-4 h-4" />}
+          isLoading={isGenerating}
+          onClick={() => void handleGenerate()}
+          className="flex-1 justify-center"
+        >
+          {isGenerating ? 'Gerando…' : 'Gerar Personagem'}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 // ─── Main Modal ────────────────────────────────────────────────────────────
 interface CharacterCreationModalProps {
   isOpen:     boolean
@@ -301,61 +406,92 @@ interface CharacterCreationModalProps {
   onCreate:   (character: Character) => void
 }
 
+const DEFAULT_BASIC: BasicInfo = {
+  name:            '',
+  race:            'Humano',
+  character_class: 'Guerreiro',
+  background:      'Soldier',
+  alignment:       'Leal e Bom',
+}
+
+const DEFAULT_ABILITY: AbilityScoreValues = {
+  strength: 10, dexterity: 10, constitution: 10,
+  intelligence: 10, wisdom: 10, charisma: 10,
+}
+
+const DEFAULT_PERSONALITY: PersonalityInfo = {
+  personality_traits: '', ideals: '', bonds: '', flaws: '',
+}
+
 export default function CharacterCreationModal({
   isOpen,
   onClose,
   campaignId,
   onCreate,
 }: CharacterCreationModalProps): React.ReactElement {
-  const [step,      setStep]      = useState<WizardStep>(1)
-  const [isLoading, setIsLoading] = useState(false)
-  const [error,     setError]     = useState<string | null>(null)
+  const [mode,         setMode]         = useState<WizardMode>('select')
+  const [step,         setStep]         = useState<WizardStep>(1)
+  const [isLoading,    setIsLoading]    = useState(false)
+  const [error,        setError]        = useState<string | null>(null)
+  const [basicInfo,    setBasicInfo]    = useState<BasicInfo>(DEFAULT_BASIC)
+  const [abilityScores, setAbilityScores] = useState<AbilityScoreValues>(DEFAULT_ABILITY)
+  const [personality,  setPersonality]  = useState<PersonalityInfo>(DEFAULT_PERSONALITY)
 
-  const [basicInfo, setBasicInfo] = useState<BasicInfo>({
-    name:            '',
-    race:            'Humano',
-    character_class: 'Guerreiro',
-    background:      'Soldier',
-    alignment:       'Leal e Bom',
-  })
+  // Reset internal state whenever the modal is opened
+  const prevOpenRef = React.useRef(false)
+  React.useEffect(() => {
+    if (isOpen && !prevOpenRef.current) reset()
+    prevOpenRef.current = isOpen
+  }, [isOpen])
 
-  const [abilityScores, setAbilityScores] = useState<AbilityScoreValues>({
-    strength:     10,
-    dexterity:    10,
-    constitution: 10,
-    intelligence: 10,
-    wisdom:       10,
-    charisma:     10,
-  })
+  function reset(): void {
+    setMode('select')
+    setStep(1)
+    setError(null)
+    setBasicInfo(DEFAULT_BASIC)
+    setAbilityScores(DEFAULT_ABILITY)
+    setPersonality(DEFAULT_PERSONALITY)
+  }
 
-  const [personality, setPersonality] = useState<PersonalityInfo>({
-    personality_traits: '',
-    ideals:             '',
-    bonds:              '',
-    flaws:              '',
-  })
+  function handleClose(): void {
+    if (isLoading) return
+    reset()
+    onClose()
+  }
+
+  function handleAiGenerated(basic: BasicInfo, persona: PersonalityInfo): void {
+    setBasicInfo(basic)
+    setPersonality(persona)
+    setMode('manual')
+    setStep(1)
+  }
 
   async function handleCreate(): Promise<void> {
     setIsLoading(true)
     setError(null)
     try {
+      // Build backstory by combining personality fields the model doesn't have separately
+      const backstoryParts = [
+        personality.bonds && `Bonds: ${personality.bonds}`,
+        personality.ideals && `Ideals: ${personality.ideals}`,
+        personality.flaws && `Flaws: ${personality.flaws}`,
+      ].filter(Boolean)
+
       const payload = {
-        campaign_id:      Number(campaignId),
-        name:             basicInfo.name,
-        race:             basicInfo.race,
-        character_class:  basicInfo.character_class,
-        background:       basicInfo.background,
-        alignment:        basicInfo.alignment,
-        level:            1,
-        experience:       0,
-        ability_scores:   abilityScores,
-        personality_traits: personality.personality_traits,
-        ideals:           personality.ideals,
-        bonds:            personality.bonds,
-        flaws:            personality.flaws,
+        campaign_id: campaignId,
+        name:        basicInfo.name,
+        race:        basicInfo.race,
+        class:       basicInfo.character_class,   // Pydantic alias
+        background:  basicInfo.background,
+        alignment:   basicInfo.alignment,
+        level:       1,
+        appearance:  personality.personality_traits || undefined,
+        backstory:   backstoryParts.length ? backstoryParts.join('\n') : undefined,
+        attributes:  abilityScores,
       }
       const character = await api.post<Character>('/characters', payload)
       onCreate(character)
+      reset()
       onClose()
     } catch {
       setError('Failed to create character. Please try again.')
@@ -363,59 +499,93 @@ export default function CharacterCreationModal({
     }
   }
 
-  function handleClose(): void {
-    if (isLoading) return
-    setStep(1)
-    setError(null)
-    onClose()
-  }
-
-  const STEP_TITLES: Record<WizardStep, string> = {
-    1: 'Create Character — Identity',
-    2: 'Create Character — Attributes',
-    3: 'Create Character — Personality',
-  }
+  const modalTitle =
+    mode === 'select' ? 'Criar Personagem' :
+    mode === 'ai'     ? 'Gerar com IA' :
+    step === 1        ? 'Personagem — Identidade' :
+    step === 2        ? 'Personagem — Atributos' :
+                        'Personagem — Personalidade'
 
   return (
-    <Modal
-      isOpen={isOpen}
-      onClose={handleClose}
-      title={STEP_TITLES[step]}
-      size="md"
-    >
-      <StepIndicator current={step} />
+    <Modal isOpen={isOpen} onClose={handleClose} title={modalTitle} size="md">
 
-      {error && (
-        <div className="mb-4 text-red-300 text-sm bg-red-900/30 border border-red-700/40 rounded-md px-3 py-2">
-          {error}
+      {/* Mode selector */}
+      {mode === 'select' && (
+        <div className="space-y-3 py-2">
+          <p className="text-slate-400 text-sm font-serif italic text-center mb-4">
+            Como deseja criar seu personagem?
+          </p>
+          <button
+            onClick={() => setMode('manual')}
+            className="w-full flex items-center gap-4 p-4 rounded-lg border border-slate-700 bg-slate-800/50 hover:border-amber-600/60 hover:bg-slate-800 transition-all text-left group"
+          >
+            <div className="w-10 h-10 rounded-full bg-amber-600/20 border border-amber-600/40 flex items-center justify-center shrink-0">
+              <User className="w-5 h-5 text-amber-400" />
+            </div>
+            <div>
+              <p className="font-serif text-amber-300 group-hover:text-amber-200 transition-colors">Criar Manualmente</p>
+              <p className="text-slate-500 text-xs mt-0.5">Preencha raça, classe e atributos você mesmo</p>
+            </div>
+            <ChevronRight className="w-4 h-4 text-slate-600 ml-auto" />
+          </button>
+
+          <button
+            onClick={() => setMode('ai')}
+            className="w-full flex items-center gap-4 p-4 rounded-lg border border-slate-700 bg-slate-800/50 hover:border-amber-600/60 hover:bg-slate-800 transition-all text-left group"
+          >
+            <div className="w-10 h-10 rounded-full bg-amber-600/20 border border-amber-600/40 flex items-center justify-center shrink-0">
+              <Sparkles className="w-5 h-5 text-amber-400" />
+            </div>
+            <div>
+              <p className="font-serif text-amber-300 group-hover:text-amber-200 transition-colors">Gerar com IA</p>
+              <p className="text-slate-500 text-xs mt-0.5">Descreva o personagem e a IA pré-preenche o formulário</p>
+            </div>
+            <ChevronRight className="w-4 h-4 text-slate-600 ml-auto" />
+          </button>
         </div>
       )}
 
-      {step === 1 && (
-        <Step1
-          data={basicInfo}
-          onChange={setBasicInfo}
-          onNext={() => setStep(2)}
+      {/* AI generation panel */}
+      {mode === 'ai' && (
+        <AiPanel
+          campaignId={campaignId}
+          onGenerated={handleAiGenerated}
+          onBack={() => setMode('select')}
         />
       )}
 
-      {step === 2 && (
-        <Step2
-          data={abilityScores}
-          onChange={setAbilityScores}
-          onNext={() => setStep(3)}
-          onBack={() => setStep(1)}
-        />
-      )}
+      {/* Manual wizard */}
+      {mode === 'manual' && (
+        <>
+          <StepIndicator current={step} />
 
-      {step === 3 && (
-        <Step3
-          data={personality}
-          onChange={setPersonality}
-          onBack={() => setStep(2)}
-          onSubmit={handleCreate}
-          isLoading={isLoading}
-        />
+          {error && (
+            <div className="mb-4 text-red-300 text-sm bg-red-900/30 border border-red-700/40 rounded-md px-3 py-2">
+              {error}
+            </div>
+          )}
+
+          {step === 1 && (
+            <Step1 data={basicInfo} onChange={setBasicInfo} onNext={() => setStep(2)} />
+          )}
+          {step === 2 && (
+            <Step2
+              data={abilityScores}
+              onChange={setAbilityScores}
+              onNext={() => setStep(3)}
+              onBack={() => setStep(1)}
+            />
+          )}
+          {step === 3 && (
+            <Step3
+              data={personality}
+              onChange={setPersonality}
+              onBack={() => setStep(2)}
+              onSubmit={handleCreate}
+              isLoading={isLoading}
+            />
+          )}
+        </>
       )}
     </Modal>
   )

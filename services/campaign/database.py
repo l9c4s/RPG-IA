@@ -45,6 +45,10 @@ class CampaignDB(Base):
     tone: Mapped[str] = mapped_column(String(100), nullable=False, default="heroic")
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="lobby")
     locations_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # init_status tracks the async opening-flow progress:
+    # "idle" | "generating" | "ready" | "failed"
+    init_status: Mapped[str] = mapped_column(String(20), nullable=False, default="idle")
+    opening_generated: Mapped[bool] = mapped_column(nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

@@ -25,7 +25,7 @@ from database import (
     SessionDB,
     SessionMessageDB,
 )
-from gm_chain import build_gm_chain, get_embeddings
+from gm_chain import build_gm_chain, get_embeddings, generate_opening_narrative, generate_companion_reaction
 from models import (
     CampaignCreate,
     CampaignStatusUpdate,
@@ -239,6 +239,110 @@ async def _fetch_campaign_characters(campaign_id: UUID) -> list[dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
+# Opening-flow orchestrator (runs as a background asyncio task)
+# ---------------------------------------------------------------------------
+
+
+async def _get_knowledge_context(question: str) -> str:
+    """Fetch a small RAG context snippet; returns empty string on any failure."""
+    try:
+        retriever = _get_retriever()
+        docs = await asyncio.get_event_loop().run_in_executor(
+            None, lambda: retriever.invoke(question)
+        )
+        return "\n\n".join(d.page_content for d in docs[:4])
+    except Exception as exc:
+        logger.warning("Knowledge context fetch failed: %s", exc)
+        return ""
+
+
+async def _run_opening_flow(campaign_id: UUID, session_id: UUID) -> None:
+    """
+    Background task: generate opening narrative and map for a new session.
+
+    Uses its own AsyncSessionLocal so it outlives the HTTP request scope.
+    init_status progression: idle → generating → ready | failed
+    """
+    from database import AsyncSessionLocal as _DBSession
+
+    async with _DBSession() as db:
+        try:
+            campaign = await db.get(CampaignDB, campaign_id)
+            if campaign is None:
+                return
+
+            # Guard against double-trigger
+            if campaign.init_status == "generating":
+                return
+
+            campaign.init_status = "generating"
+            await db.commit()
+
+            characters = await _fetch_campaign_characters(campaign_id)
+            query = f"{campaign.title} {campaign.rpg_system} {campaign.description or ''}"
+            knowledge_ctx = await _get_knowledge_context(query)
+
+            campaign_dict = {
+                "title":       campaign.title,
+                "rpg_system":  campaign.rpg_system,
+                "description": campaign.description,
+                "tone":        campaign.tone,
+                "difficulty":  campaign.difficulty,
+            }
+
+            # Generate opening narrative
+            opening_text = await generate_opening_narrative(
+                campaign=campaign_dict,
+                characters=characters,
+                knowledge_context=knowledge_ctx,
+            )
+
+            # Persist opening as first GM message in the session
+            await _save_message(
+                db,
+                session_id=session_id,
+                role="gm_opening",
+                content=opening_text,
+            )
+
+            # Generate map if not already present
+            if not campaign.locations_json:
+                llm = ChatOpenAI(model="gpt-4o", temperature=0.85)
+                map_prompt = (
+                    f"You are a fantasy world builder for a tabletop RPG campaign.\n"
+                    f'Campaign: "{campaign.title}"\nSystem: {campaign.rpg_system}\n'
+                    f"Description: {campaign.description or 'A classic adventure'}\n"
+                    f"Tone: {campaign.tone}\n\n"
+                    f"Create exactly 6 distinct locations. Return ONLY a valid JSON array "
+                    f"with 6 objects: id (loc_1…), name, description, x (5-95), y (5-95), "
+                    f'type (city/dungeon/wilderness/landmark/unknown), '
+                    f"is_current (true only for first), discovered (true for first 2)."
+                )
+                result = await asyncio.to_thread(llm.invoke, map_prompt)
+                raw = result.content.strip()
+                if raw.startswith("```"):
+                    raw = raw.split("```")[1]
+                    if raw.startswith("json"):
+                        raw = raw[4:]
+                campaign.locations_json = raw
+
+            campaign.opening_generated = True
+            campaign.init_status = "ready"
+            await db.commit()
+            logger.info("Opening flow complete for campaign=%s session=%s", campaign_id, session_id)
+
+        except Exception as exc:
+            logger.exception("Opening flow failed campaign=%s: %s", campaign_id, exc)
+            try:
+                campaign = await db.get(CampaignDB, campaign_id)
+                if campaign:
+                    campaign.init_status = "failed"
+                    await db.commit()
+            except Exception:
+                pass
+
+
+# ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 
@@ -337,6 +441,46 @@ async def session_action(
         role="gm",
         content=raw_gm_text,
     )
+
+    # 5b — AI companion reactions (fire-and-forget, max 2 companions)
+    async def _react_and_broadcast(companion: dict[str, Any]) -> None:
+        try:
+            reaction = await generate_companion_reaction(
+                companion=companion,
+                gm_text=clean_text,
+                player_action=payload.action_text,
+            )
+            from database import AsyncSessionLocal as _DBSession
+            async with _DBSession() as rdb:
+                await _save_message(
+                    rdb,
+                    session_id=payload.session_id,
+                    role="ai_companion",
+                    content=reaction,
+                    character_id=UUID(str(companion["id"])) if companion.get("id") else None,
+                )
+                await rdb.commit()
+            await manager.broadcast(
+                session_id_str,
+                {
+                    "type":           "companion_reaction",
+                    "companion_name": companion.get("name", "Companion"),
+                    "text":           reaction,
+                    "character_id":   str(companion.get("id", "")),
+                },
+            )
+        except Exception as exc:
+            logger.warning("Companion reaction failed for %s: %s", companion.get("name"), exc)
+
+    try:
+        session_row_for_campaign = await db.get(SessionDB, payload.session_id)
+        if session_row_for_campaign:
+            companions_resp = await _fetch_campaign_characters(session_row_for_campaign.campaign_id)
+            ai_companions = [c for c in companions_resp if c.get("char_type") == "ai_companion"][:2]
+            for companion in ai_companions:
+                asyncio.create_task(_react_and_broadcast(companion))
+    except Exception as exc:
+        logger.warning("Could not schedule companion reactions: %s", exc)
 
     # 6 — Fire-and-forget media generation
     session_id_str = str(payload.session_id)
@@ -563,10 +707,10 @@ async def update_campaign_status(
 
     if payload.status == "active":
         characters = await _fetch_campaign_characters(campaign_id)
-        if len(characters) < 2:
+        if len(characters) < 1:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"São necessários pelo menos 2 personagens para iniciar. Atualmente: {len(characters)}.",
+                detail="É necessário pelo menos 1 personagem para ativar a campanha.",
             )
 
     campaign.status = payload.status
@@ -835,12 +979,40 @@ async def delete_campaign(
 # ---------------------------------------------------------------------------
 
 
+@app.get("/campaigns/{campaign_id}/sessions/current", status_code=status.HTTP_200_OK)
+async def get_current_session(
+    campaign_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Retorna a sessão mais recente + init_status da campanha, ou 404 se não houver sessão."""
+    from sqlalchemy import select as sa_select
+
+    result = await db.execute(
+        sa_select(SessionDB)
+        .where(SessionDB.campaign_id == campaign_id)
+        .order_by(SessionDB.started_at.desc())
+        .limit(1)
+    )
+    session = result.scalar_one_or_none()
+    if session is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Nenhuma sessão iniciada.")
+
+    campaign = await db.get(CampaignDB, campaign_id)
+    return {
+        "id":               str(session.id),
+        "campaign_id":      str(session.campaign_id),
+        "started_at":       session.started_at.isoformat(),
+        "init_status":      campaign.init_status if campaign else "idle",
+        "has_opening":      campaign.opening_generated if campaign else False,
+    }
+
+
 @app.post("/campaigns/{campaign_id}/sessions/start", status_code=status.HTTP_201_CREATED)
 async def start_campaign_session(
     campaign_id: UUID,
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Start a new game session for an existing campaign."""
+    """Inicia uma nova sessão. Ativa a campanha automaticamente se ainda estiver em lobby."""
     campaign = await db.get(CampaignDB, campaign_id)
     if campaign is None:
         raise HTTPException(
@@ -848,27 +1020,40 @@ async def start_campaign_session(
             detail="Campanha não encontrada.",
         )
 
-    if campaign.status != "active":
+    if campaign.status not in ("lobby", "active"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="A campanha deve estar ativa para iniciar a sessão.",
+            detail=f"Não é possível iniciar uma sessão com a campanha em status '{campaign.status}'.",
         )
 
     characters = await _fetch_campaign_characters(campaign_id)
-    if len(characters) < 2:
+    if len(characters) < 1:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"São necessários pelo menos 2 personagens para iniciar. Atualmente: {len(characters)}.",
+            detail="É necessário pelo menos 1 personagem para iniciar a sessão.",
         )
+
+    # Ativa a campanha automaticamente se ainda estiver em lobby
+    if campaign.status == "lobby":
+        campaign.status = "active"
+        await db.flush()
 
     session = SessionDB(id=uuid4(), campaign_id=campaign_id)
     db.add(session)
     await db.flush()
     await db.refresh(session)
+
+    # Kick off opening narrative + map generation asynchronously.
+    # _run_opening_flow creates its own DB session so it outlives this request.
+    if not campaign.opening_generated:
+        asyncio.create_task(_run_opening_flow(campaign_id, session.id))
+
     return {
-        "id": str(session.id),
+        "id":          str(session.id),
         "campaign_id": str(session.campaign_id),
-        "started_at": session.started_at.isoformat(),
+        "started_at":  session.started_at.isoformat(),
+        "init_status": campaign.init_status,
+        "has_opening": campaign.opening_generated,
     }
 
 
@@ -892,10 +1077,10 @@ async def create_session(
         )
 
     characters = await _fetch_campaign_characters(payload.campaign_id)
-    if len(characters) < 2:
+    if len(characters) < 1:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"São necessários pelo menos 2 personagens para iniciar. Atualmente: {len(characters)}.",
+            detail="É necessário pelo menos 1 personagem para iniciar a sessão.",
         )
 
     session = SessionDB(id=uuid4(), campaign_id=payload.campaign_id)
@@ -907,6 +1092,83 @@ async def create_session(
         "campaign_id": str(session.campaign_id),
         "started_at": session.started_at.isoformat(),
     }
+
+
+# ---------------------------------------------------------------------------
+# Session messages
+# ---------------------------------------------------------------------------
+
+
+@app.get("/sessions/{session_id}/messages", status_code=status.HTTP_200_OK)
+async def get_session_messages(
+    session_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> list[dict[str, Any]]:
+    """Retorna todas as mensagens de uma sessão em ordem cronológica."""
+    from sqlalchemy import select as sa_select
+
+    result = await db.execute(
+        sa_select(SessionMessageDB)
+        .where(SessionMessageDB.session_id == session_id)
+        .order_by(SessionMessageDB.created_at.asc())
+    )
+    messages = result.scalars().all()
+    return [
+        {
+            "id":           str(m.id),
+            "session_id":   str(m.session_id),
+            "role":         m.role,
+            "content":      m.content,
+            "player_id":    str(m.player_id) if m.player_id else None,
+            "character_id": str(m.character_id) if m.character_id else None,
+            "created_at":   m.created_at.isoformat(),
+        }
+        for m in messages
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Manual generate-opening (standalone trigger, idempotent)
+# ---------------------------------------------------------------------------
+
+
+@app.post("/campaigns/{campaign_id}/generate-opening", status_code=status.HTTP_202_ACCEPTED)
+async def trigger_generate_opening(
+    campaign_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """
+    Dispara manualmente a geração da narrativa de abertura.
+    Idempotente: ignora se já gerado ou já em andamento.
+    Retorna o init_status atual imediatamente (geração ocorre em background).
+    """
+    campaign = await db.get(CampaignDB, campaign_id)
+    if campaign is None:
+        raise HTTPException(status_code=404, detail="Campanha não encontrada.")
+
+    if campaign.opening_generated:
+        return {"init_status": "ready", "message": "Abertura já gerada."}
+
+    if campaign.init_status == "generating":
+        return {"init_status": "generating", "message": "Geração já em andamento."}
+
+    # Find the latest session to attach the opening message to
+    from sqlalchemy import select as sa_select
+    result = await db.execute(
+        sa_select(SessionDB)
+        .where(SessionDB.campaign_id == campaign_id)
+        .order_by(SessionDB.started_at.desc())
+        .limit(1)
+    )
+    session = result.scalar_one_or_none()
+    if session is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Inicie a sessão antes de gerar a abertura.",
+        )
+
+    asyncio.create_task(_run_opening_flow(campaign_id, session.id))
+    return {"init_status": "generating", "message": "Geração iniciada."}
 
 
 # ---------------------------------------------------------------------------

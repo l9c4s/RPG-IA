@@ -31,9 +31,13 @@ export function Modal({
   size = 'md',
   footer,
 }: ModalProps): React.ReactElement | null {
-  const dialogRef = useRef<HTMLDivElement>(null)
+  const dialogRef  = useRef<HTMLDivElement>(null)
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
 
   // Focus trap + ESC key
+  // onClose is kept in a ref so the effect never re-fires due to a new
+  // function reference — prevents focus being stolen on every keystroke.
   useEffect(() => {
     if (!isOpen) return
 
@@ -42,7 +46,7 @@ export function Modal({
 
     function handleKeyDown(e: KeyboardEvent): void {
       if (e.key === 'Escape') {
-        onClose()
+        onCloseRef.current()
         return
       }
 
@@ -75,7 +79,7 @@ export function Modal({
       document.removeEventListener('keydown', handleKeyDown)
       previouslyFocused?.focus()
     }
-  }, [isOpen, onClose])
+  }, [isOpen])
 
   if (!isOpen) return null
 

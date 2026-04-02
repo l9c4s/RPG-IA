@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { ChatMessage, GMResponse, PlayerAction } from '../types'
+import type { ChatMessage } from '../types'
 
 export const sessionApi = {
   getOrCreate: (campaignId: string) =>
@@ -8,6 +8,6 @@ export const sessionApi = {
   getHistory: (sessionId: string) =>
     apiClient.get<ChatMessage[]>(`/session/sessions/${sessionId}/messages`),
 
-  sendAction: (sessionId: string, action: PlayerAction) =>
-    apiClient.post<GMResponse>(`/session/sessions/${sessionId}/action`, action),
+  sendAction: (sessionId: string, action: Record<string, unknown>) =>
+    apiClient.post<unknown>(`/session/sessions/${sessionId}/action`, action),
 }

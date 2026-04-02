@@ -14,7 +14,7 @@ import { Spinner } from './ui/Spinner'
 import { Badge } from './ui/Badge'
 import type {
   ChatMessage, Character, CharacterStatus, WSMessage,
-  GMResponse, PlayerAction, DiceRoll, StateUpdate, Campaign
+  DiceRoll, StateUpdate, Campaign
 } from '../types'
 import WorldMap from './WorldMap'
 
@@ -47,8 +47,8 @@ function ConnectionBadge({ status }: { status: ConnStatus }): React.ReactElement
 
 // ─── Dice result display ───────────────────────────────────────────────────
 function DiceRollDisplay({ roll }: { roll: DiceRoll }): React.ReactElement {
-  const isCrit  = roll.notation.includes('d20') && roll.result === 20
-  const isFumble = roll.notation.includes('d20') && roll.result === 1
+  const isCrit   = roll.expr.includes('d20') && roll.result === 20
+  const isFumble = roll.expr.includes('d20') && roll.result === 1
 
   return (
     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold font-serif border ${
@@ -59,7 +59,7 @@ function DiceRollDisplay({ roll }: { roll: DiceRoll }): React.ReactElement {
         : 'bg-slate-700/60 border-slate-600/60 text-slate-300'
     }`}>
       {isCrit ? <Dice6 className="w-3 h-3 text-amber-400" /> : <Dice1 className="w-3 h-3 text-slate-400" />}
-      {roll.notation} = <strong>{roll.result}</strong>
+      {roll.expr} = <strong>{roll.result}</strong>
       {roll.breakdown && <span className="text-slate-400 font-normal">({roll.breakdown})</span>}
     </span>
   )
@@ -70,7 +70,7 @@ function StateUpdateDisplay({ update }: { update: StateUpdate }): React.ReactEle
   return (
     <span className="inline-flex items-center gap-1 text-xs bg-purple-900/40 border border-purple-700/40 rounded px-2 py-0.5 text-purple-300">
       <Zap className="w-3 h-3" />
-      {update.label}
+      {update.field}: {update.value}
     </span>
   )
 }
@@ -100,6 +100,40 @@ function MessageBubble({ message }: MessageBubbleProps): React.ReactElement {
     return (
       <div className="flex justify-center my-2 animate-fade-in">
         <div className="chat-system max-w-lg text-center">
+          {message.content}
+        </div>
+      </div>
+    )
+  }
+
+  // ── Opening narration — special immersive card ─────────────────────────
+  if (message.role === 'gm_opening') {
+    return (
+      <div className="my-4 animate-fade-in">
+        <div className="relative border border-amber-700/50 bg-gradient-to-b from-amber-950/30 to-slate-900/60 rounded-xl p-5 shadow-lg">
+          <div className="flex items-center gap-2 mb-3">
+            <BookOpen className="w-4 h-4 text-amber-400" />
+            <span className="text-amber-400 font-serif text-xs font-semibold tracking-widest uppercase">Abertura da Campanha</span>
+            <span className="text-slate-600 text-xs ml-auto">{timeStr}</span>
+          </div>
+          <p className="text-slate-200 font-serif leading-relaxed whitespace-pre-wrap italic">
+            {message.content}
+          </p>
+        </div>
+      </div>
+    )
+  }
+
+  // ── AI Companion reaction ───────────────────────────────────────────────
+  if (message.role === 'ai_companion') {
+    return (
+      <div className="flex flex-col gap-1 animate-fade-in items-start">
+        <div className="flex items-center gap-1.5 text-xs text-purple-400">
+          <span className="font-serif">{message.character_name ?? 'Companion'}</span>
+          <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-900/50 border border-purple-700/50 text-purple-300">IA</span>
+          <span className="text-slate-600">{timeStr}</span>
+        </div>
+        <div className="max-w-[80%] bg-purple-950/40 border border-purple-800/40 rounded-lg px-4 py-2.5 text-slate-300 text-sm font-serif italic">
           {message.content}
         </div>
       </div>
@@ -270,7 +304,11 @@ export default function GameSession(): React.ReactElement {
   const handleWsMessage = useCallback((wsMsg: WSMessage) => {
     switch (wsMsg.type) {
       case 'gm_response': {
-        const gm = wsMsg.payload as GMResponse
+        const gm = wsMsg.payload as {
+          content: string; timestamp?: string
+          dice_rolls?: DiceRoll[]; state_updates?: StateUpdate[]
+          image_url?: string; audio_url?: string
+        }
         setGmTyping(false)
         setMessages((prev) => [
           ...prev,
@@ -278,7 +316,7 @@ export default function GameSession(): React.ReactElement {
             id:            crypto.randomUUID(),
             role:          'gm',
             content:       gm.content,
-            timestamp:     gm.timestamp,
+            timestamp:     gm.timestamp ?? new Date().toISOString(),
             dice_rolls:    gm.dice_rolls,
             state_updates: gm.state_updates,
             image_url:     gm.image_url,
@@ -314,6 +352,20 @@ export default function GameSession(): React.ReactElement {
         setGmTyping(false)
         break
       }
+      case 'companion_reaction': {
+        const comp = wsMsg.payload as { companion_name: string; text: string; character_id: string }
+        setMessages((prev) => [
+          ...prev,
+          {
+            id:             crypto.randomUUID(),
+            role:           'ai_companion',
+            content:        comp.text,
+            timestamp:      new Date().toISOString(),
+            character_name: comp.companion_name,
+          } as ChatMessage,
+        ])
+        break
+      }
       default:
         break
     }
@@ -340,11 +392,30 @@ export default function GameSession(): React.ReactElement {
           return
         }
 
-        const sessionData = await api.post<{ id: string; history: ChatMessage[] }>(
-          `/campaigns/${campaignId}/sessions/start`,
+        // Fetch the current (already-started) session — Lobby handles creation
+        const sessionData = await api.get<{ id: string; init_status: string }>(
+          `/campaigns/${campaignId}/sessions/current`,
         )
         setSessionId(sessionData.id)
-        setMessages(sessionData.history ?? [])
+
+        // Load full message history (includes gm_opening + ai_companion messages)
+        try {
+          const rawMessages = await api.get<Array<{
+            id: string; role: string; content: string
+            created_at: string; character_id?: string
+          }>>(`/sessions/${sessionData.id}/messages`)
+
+          setMessages(
+            rawMessages.map((m) => ({
+              id:        m.id,
+              role:      m.role as ChatMessage['role'],
+              content:   m.content,
+              timestamp: m.created_at,
+            })),
+          )
+        } catch {
+          // First session — no messages yet
+        }
 
         // Load character
         try {
@@ -352,7 +423,7 @@ export default function GameSession(): React.ReactElement {
             `/campaigns/${campaignId}/characters`,
           )
           setParty(chars)
-          const myChar = chars.find((c) => c.player_id === String(user.id)) ?? chars[0]
+          const myChar = chars.find((c) => c.owner_id === String(user.id)) ?? chars[0]
           if (myChar) setCharacter(myChar)
         } catch {
           // No character yet — that's OK
@@ -403,11 +474,10 @@ export default function GameSession(): React.ReactElement {
     setGmTyping(true)
 
     try {
-      const action: Partial<PlayerAction> = {
+      const action = {
         session_id:   sessionId,
         character_id: character?.id,
-        content,
-        action_type:  'free_action',
+        action_text:  content,
       }
       send({ type: 'player_action', payload: action })
     } catch {
@@ -494,6 +564,14 @@ export default function GameSession(): React.ReactElement {
         </div>
 
         <div className="topbar-right">
+          <button
+            onClick={() => navigate('/dashboard')}
+            className="flex items-center gap-1 text-xs text-slate-400 hover:text-amber-400 transition-colors px-2 py-1 rounded hover:bg-slate-700/50"
+            title="Voltar ao Dashboard"
+          >
+            <ChevronLeft className="w-3.5 h-3.5" />
+            Campanhas
+          </button>
           <div className="difficulty-badge diff-normal" onClick={openSettings}>
             ⚙ Settings
           </div>
@@ -661,46 +739,6 @@ export default function GameSession(): React.ReactElement {
                   </div>
                 </div>
               </div>
-            )}
-
-            <div ref={messagesEndRef} />
-          </div>
-
-          {/* Input area */}
-          <div className="border-t border-amber-700/20 bg-slate-900/90 p-3 shrink-0">
-            <div className="flex gap-2 items-end">
-              <textarea
-                ref={textareaRef}
-                value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Describe your action… (Enter to send, Shift+Enter for new line)"
-                className="input-dark flex-1 resize-none min-h-[44px] max-h-32 leading-relaxed py-2.5"
-                rows={1}
-                disabled={isSending || connectionStatus !== 'connected'}
-                style={{ height: 'auto' }}
-                onInput={(e) => {
-                  const el = e.currentTarget
-                  el.style.height = 'auto'
-                  el.style.height = Math.min(el.scrollHeight, 128) + 'px'
-                }}
-              />
-              <button
-                onClick={() => void sendAction(inputText)}
-                disabled={
-                  !inputText.trim() ||
-                  isSending ||
-                  connectionStatus !== 'connected'
-                }
-                className="btn-primary px-3 py-2.5 shrink-0"
-                title="Send action (Enter)"
-              >
-                {isSending ? (
-                  <Spinner size="sm" />
-                ) : (
-                  <Send className="w-4 h-4" />
-                )}
-              </button>
             </div>
 
             <div className="stat-card">
@@ -723,8 +761,8 @@ export default function GameSession(): React.ReactElement {
               ) : (
                 character?.inventory.slice(0, 6).map((item) => (
                   <div key={item.id} className="inventory-row">
-                    <span className="item-name">{item.name}</span>
-                    <span className="item-type">{item.description ?? (item.equipped ? 'equipped' : 'item')}</span>
+                    <span className="item-name">{item.item_name}</span>
+                    <span className="item-type">{item.item_type}{item.equipped ? ' (E)' : ''}</span>
                     <span className="item-qty">{item.quantity ?? 1}</span>
                   </div>
                 ))

@@ -120,6 +120,7 @@ CREATE TABLE IF NOT EXISTS session_messages (
     id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     session_id  UUID REFERENCES sessions(id) ON DELETE CASCADE,
     player_id   UUID,                 -- NULL = mensagem do GM
+    character_id UUID,               -- personagem que enviou a mensagem
     role        TEXT NOT NULL,        -- "player", "gm", "system"
     content     TEXT NOT NULL,
     metadata    JSONB DEFAULT '{}',   -- rolls, state updates, image refs

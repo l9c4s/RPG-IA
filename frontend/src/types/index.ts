@@ -7,7 +7,7 @@ export type Nullable<T> = T | null
 //  Auth
 // ─────────────────────────────────────────────
 export interface User {
-  id: number
+  id: string
   username: string
   email: string
   is_active: boolean
@@ -34,220 +34,165 @@ export interface RegisterRequest {
 // ─────────────────────────────────────────────
 //  Campaigns
 // ─────────────────────────────────────────────
-export type CampaignStatus = 'active' | 'paused' | 'completed' | 'archived'
+export type CampaignStatus = 'lobby' | 'active' | 'paused' | 'completed' | 'archived'
+export type InitStatus     = 'idle' | 'generating' | 'ready' | 'failed'
 
 export interface Campaign {
-  id: number
-  title: string
-  description: string
-  rpg_system: string
-  status: CampaignStatus
-  owner_id: number
-  created_at: string
-  updated_at: string
-  session_count?: number
-  player_count?: number
+  id:               string
+  title:            string
+  description:      string | null
+  rpg_system:       string
+  difficulty:       string
+  tone:             string
+  status:           CampaignStatus
+  init_status:      InitStatus
+  opening_generated: boolean
+  owner_id?:        string
+  created_at:       string
+  updated_at:       string
+  session_count?:   number
+  player_count?:    number
 }
 
 export type CampaignStatusType = Campaign['status']
 
 export interface CreateCampaignRequest {
-  title: string
+  title:       string
   description: string
-  rpg_system: string
+  rpg_system:  string
+  difficulty?: string
+  tone?:       string
 }
 
 // ─────────────────────────────────────────────
 //  Characters
 // ─────────────────────────────────────────────
-export type Alignment =
-  | 'Lawful Good'    | 'Neutral Good'   | 'Chaotic Good'
-  | 'Lawful Neutral' | 'True Neutral'   | 'Chaotic Neutral'
-  | 'Lawful Evil'    | 'Neutral Evil'   | 'Chaotic Evil'
-
-export interface AbilityScores {
+export interface CharacterAttributes {
+  id:           string
+  character_id: string
   strength:     number
   dexterity:    number
   constitution: number
   intelligence: number
   wisdom:       number
   charisma:     number
+  armor_class:  number
+  initiative:   number
+  speed:        number
 }
 
-export interface SavingThrows {
-  strength:     boolean
-  dexterity:    boolean
-  constitution: boolean
-  intelligence: boolean
-  wisdom:       boolean
-  charisma:     boolean
-}
-
-export interface Skills {
-  acrobatics:       boolean
-  animal_handling:  boolean
-  arcana:           boolean
-  athletics:        boolean
-  deception:        boolean
-  history:          boolean
-  insight:          boolean
-  intimidation:     boolean
-  investigation:    boolean
-  medicine:         boolean
-  nature:           boolean
-  perception:       boolean
-  performance:      boolean
-  persuasion:       boolean
-  religion:         boolean
-  sleight_of_hand:  boolean
-  stealth:          boolean
-  survival:         boolean
-}
-
-export interface SpellSlots {
-  level: number
-  total: number
-  used:  number
+export interface CharacterStatus {
+  id:                  string
+  character_id:        string
+  hp_max:              number
+  hp_current:          number
+  hp_temp:             number
+  conditions:          string[]
+  spell_slots:         Record<string, number>
+  exhaustion:          number
+  death_saves_success: number
+  death_saves_failure: number
+  updated_at:          string
 }
 
 export interface InventoryItem {
-  id:          string
-  name:        string
-  quantity:    number
-  weight?:     number
-  description?: string
-  equipped:    boolean
+  id:           string
+  character_id: string
+  item_name:    string
+  item_type:    string
+  quantity:     number
+  weight:       number
+  value_gp:     number
+  properties:   Record<string, unknown>
+  equipped:     boolean
+  created_at:   string
 }
 
 export interface CharacterAbility {
-  id:          string
-  name:        string
-  description: string
-  source:      string
-}
-
-export type Condition =
-  | 'Blinded'    | 'Charmed'     | 'Deafened'    | 'Exhaustion'
-  | 'Frightened' | 'Grappled'    | 'Incapacitated'| 'Invisible'
-  | 'Paralyzed'  | 'Petrified'   | 'Poisoned'    | 'Prone'
-  | 'Restrained' | 'Stunned'     | 'Unconscious'
-
-export interface CharacterStatus {
-  hp_current:    number
-  hp_max:        number
-  hp_temp:       number
-  ac:            number
-  speed:         number
-  initiative:    number
-  death_saves_successes: number
-  death_saves_failures:  number
-  conditions:    Condition[]
-  exhaustion_level: number
+  id:              string
+  character_id:    string
+  ability_name:    string
+  ability_type:    string
+  description:     string | null
+  spell_level:     number | null
+  uses_max:        number | null
+  uses_remaining:  number | null
+  recharge:        string | null
 }
 
 export interface Character {
-  id:            number
-  campaign_id:   number
-  player_id:     number
-  name:          string
-  race:          string
-  subrace?:      string
-  character_class: string
-  subclass?:     string
-  level:         number
-  experience:    number
-  alignment:     Alignment
-  background:    string
-  personality_traits: string
-  ideals:        string
-  bonds:         string
-  flaws:         string
-  ability_scores:  AbilityScores
-  saving_throws:   SavingThrows
-  skills:          Skills
-  spell_slots:     SpellSlots[]
-  inventory:       InventoryItem[]
-  abilities:       CharacterAbility[]
-  status:          CharacterStatus
-  notes:           string
-  created_at:      string
-  updated_at:      string
+  id:               string
+  name:             string
+  race:             string
+  character_class:  string
+  subclass?:        string | null
+  level:            number
+  proficiency_bonus: number
+  background:       string | null
+  alignment:        string | null
+  char_type:        'player' | 'npc' | 'ai_companion'
+  backstory:        string | null
+  appearance:       string | null
+  campaign_id:      string | null
+  owner_id:         string | null
+  is_alive:         boolean
+  created_at:       string
+  updated_at:       string
+  status?:          CharacterStatus | null
+  attributes?:      CharacterAttributes | null
+  inventory:        InventoryItem[]
+  abilities:        CharacterAbility[]
 }
 
 // ─────────────────────────────────────────────
 //  Game Session / Actions
 // ─────────────────────────────────────────────
-export type ActionType =
-  | 'free_action'
-  | 'combat_action'
-  | 'skill_check'
-  | 'movement'
-  | 'dialogue'
-  | 'spell'
-  | 'item_use'
-
-export interface PlayerAction {
-  session_id:    number
-  character_id:  number
-  action_type:   ActionType
-  content:       string
-  timestamp:     string
-}
-
 export interface DiceRoll {
-  notation:  string
+  expr:      string
   result:    number
   breakdown: string
 }
 
 export interface StateUpdate {
-  field:     string
-  old_value: unknown
-  new_value: unknown
-  label:     string
+  field: string
+  value: string
 }
 
-export interface GMResponse {
-  session_id:    number
-  content:       string
-  narration:     string
-  dice_rolls?:   DiceRoll[]
-  state_updates?: StateUpdate[]
-  image_url?:    string
-  audio_url?:    string
-  timestamp:     string
-}
-
-export type ChatMessageRole = 'player' | 'gm' | 'system'
+export type ChatMessageRole =
+  | 'player'
+  | 'gm'
+  | 'gm_opening'
+  | 'ai_companion'
+  | 'system'
 
 export interface ChatMessage {
-  id:          string
-  role:        ChatMessageRole
-  content:     string
-  timestamp:   string
+  id:              string
+  role:            ChatMessageRole
+  content:         string
+  timestamp:       string
   character_name?: string
-  dice_rolls?: DiceRoll[]
-  state_updates?: StateUpdate[]
-  image_url?:  string
-  audio_url?:  string
+  dice_rolls?:     DiceRoll[]
+  state_updates?:  StateUpdate[]
+  image_url?:      string
+  audio_url?:      string
 }
 
 // ─────────────────────────────────────────────
 //  Knowledge Bank
 // ─────────────────────────────────────────────
-export type PDFSourceType = 'rulebook' | 'sourcebook' | 'adventure' | 'supplement' | 'homebrew'
+export type PDFSourceType    = 'rulebook' | 'sourcebook' | 'adventure' | 'supplement' | 'homebrew'
 export type ProcessingStatus = 'pending' | 'processing' | 'done' | 'error'
 
 export interface PDFSource {
-  id:           number
-  title:        string
-  rpg_system:   string
-  source_type:  PDFSourceType
-  filename:     string
-  status:       ProcessingStatus
-  chunk_count:  number
-  error_msg?:   string
-  uploaded_at:  string
+  id:            string
+  title:         string
+  rpg_system:    string
+  source_type:   PDFSourceType
+  filename:      string
+  status:        ProcessingStatus
+  chunk_count:   number
+  error_msg?:    string
+  uploaded_at:   string
   processed_at?: string
 }
 
@@ -266,6 +211,7 @@ export interface KnowledgeStats {
 export type WSMessageType =
   | 'player_action'
   | 'gm_response'
+  | 'companion_reaction'
   | 'state_update'
   | 'system_message'
   | 'ping'
@@ -282,16 +228,16 @@ export interface WSMessage {
 //  Misc
 // ─────────────────────────────────────────────
 export interface ApiError {
-  detail: string
+  detail:  string
   status?: number
 }
 
 export interface PaginatedResponse<T> {
-  items:   T[]
-  total:   number
-  page:    number
-  size:    number
-  pages:   number
+  items: T[]
+  total: number
+  page:  number
+  size:  number
+  pages: number
 }
 
 export interface Location {
