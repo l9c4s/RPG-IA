@@ -132,6 +132,9 @@ export default function Lobby(): React.ReactElement {
         if (updated.init_status !== 'generating') {
           clearInterval(pollRef.current!)
           pollRef.current = null
+          if (updated.init_status === 'ready') {
+            navigate(`/campaign/${campaignId}`)
+          }
         }
       } catch { /* ignore transient poll errors */ }
     }, 3000)

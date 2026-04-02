@@ -153,7 +153,77 @@
   }
 
   .app {
-    @apply min-h-screen h-screen grid grid-cols-[280px_1fr] grid-rows-[64px_1fr] bg-slate-900 text-slate-100;
+    @apply min-h-screen h-screen grid grid-cols-[260px_1fr_200px] grid-rows-[64px_1fr] bg-slate-900 text-slate-100;
+  }
+
+  /* ── Character side panels ─────────────────────────────────── */
+  .char-panels {
+    @apply flex flex-col gap-0 overflow-hidden border-l border-slate-800/80 bg-slate-950/60 min-h-0;
+  }
+
+  .char-panel-img {
+    @apply flex flex-col items-center justify-center border-b border-slate-800/80 p-3;
+    flex: 0 0 200px;
+  }
+
+  .char-panel-img .pixel-avatar {
+    image-rendering: pixelated;
+    @apply w-28 h-28 rounded-lg border-2 border-slate-700 object-cover bg-slate-800;
+  }
+
+  .char-panel-img .pixel-placeholder {
+    @apply w-28 h-28 rounded-lg border-2 border-slate-700 bg-slate-800 flex items-center justify-center text-4xl;
+    image-rendering: pixelated;
+    font-size: 2.5rem;
+  }
+
+  .char-panel-stats {
+    @apply flex flex-col gap-2 p-3 overflow-y-auto min-h-0;
+    flex: 1;
+  }
+
+  .cstat-row {
+    @apply flex items-center justify-between text-xs;
+  }
+
+  .cstat-label {
+    @apply text-slate-500 uppercase tracking-wide text-[10px];
+  }
+
+  .cstat-value {
+    @apply font-bold text-slate-100;
+  }
+
+  .cstat-hp-bar {
+    @apply h-1.5 rounded-full bg-slate-800 overflow-hidden mt-0.5 mb-1;
+  }
+
+  .cstat-hp-fill {
+    @apply h-full rounded-full transition-all duration-300;
+  }
+
+  .cstat-divider {
+    @apply border-t border-slate-800/60 my-1;
+  }
+
+  .cstat-attr-grid {
+    @apply grid grid-cols-3 gap-1 mt-1;
+  }
+
+  .cstat-attr-box {
+    @apply flex flex-col items-center bg-slate-800/60 rounded p-1;
+  }
+
+  .cstat-attr-name {
+    @apply text-[9px] text-slate-500 uppercase;
+  }
+
+  .cstat-attr-val {
+    @apply text-xs font-bold text-slate-200;
+  }
+
+  .cstat-attr-mod {
+    @apply text-[9px] text-amber-400;
   }
 
   .topbar {
@@ -211,7 +281,7 @@
   }
 
   .char-card {
-    @apply bg-slate-900 border border-slate-800 rounded-3xl p-4 cursor-pointer transition-all duration-200;
+    @apply bg-slate-900 border border-slate-800 rounded-2xl px-3 py-2 cursor-pointer transition-all duration-200 mb-2;
   }
 
   .char-card:hover,
@@ -220,7 +290,7 @@
   }
 
   .char-header {
-    @apply flex items-center gap-3 mb-3;
+    @apply flex items-center gap-3 mb-0;
   }
 
   .char-avatar {

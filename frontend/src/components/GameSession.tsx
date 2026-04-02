@@ -584,41 +584,23 @@ export default function GameSession(): React.ReactElement {
           {party.length === 0 ? (
             <p className="text-slate-400 text-xs">Nenhum membro disponível ainda.</p>
           ) : (
-            party.slice(0, 5).map((member, index) => {
-              const hpMax = member.status?.hp_max ?? 1
-              const hpCur = member.status?.hp_current ?? 0
-              const hpPercent = Math.max(0, Math.min(100, (hpCur / hpMax) * 100))
-              const hpColor = hpPercent > 50 ? 'hp-full' : hpPercent > 25 ? 'hp-mid' : 'hp-low'
-
-              return (
-                <div
-                  key={member.id}
-                  className={`char-card ${member.id === character?.id ? 'active' : ''}`}
-                  onClick={() => setCharacter(member)}
-                >
-                  <div className="char-header">
-                    <div className="char-avatar">{member.name?.slice(0, 2).toUpperCase()}</div>
-                    <div>
-                      <div className="char-name">{member.name}</div>
-                      <div className="char-meta">
-                        {member.race ?? 'Unknown'} {member.character_class ?? ''} · Lv {member.level ?? 1}
-                      </div>
+            party.slice(0, 5).map((member) => (
+              <div
+                key={member.id}
+                className={`char-card ${member.id === character?.id ? 'active' : ''}`}
+                onClick={() => setCharacter(member)}
+              >
+                <div className="char-header">
+                  <div className="char-avatar">{member.name?.slice(0, 2).toUpperCase()}</div>
+                  <div>
+                    <div className="char-name">{member.name}</div>
+                    <div className="char-meta">
+                      {member.race ?? 'Unknown'} {member.character_class ?? ''} · Lv {member.level ?? 1}
                     </div>
                   </div>
-                  <div className="hp-bar-wrap">
-                    <div className="hp-label"><span>HP</span><span>{hpCur}/{hpMax}</span></div>
-                    <div className="hp-bar"><div className={`hp-fill ${hpColor}`} style={{ width: `${hpPercent}%` }} /></div>
-                  </div>
-                  {(member.status?.conditions ?? []).length > 0 && (
-                    <div className="conditions">
-                      {member.status?.conditions.map((cond) => (
-                        <span key={cond} className="condition-tag">{cond}</span>
-                      ))}
-                    </div>
-                  )}
                 </div>
-              )
-            })
+              </div>
+            ))
           )}
         </div>
 
@@ -794,6 +776,83 @@ export default function GameSession(): React.ReactElement {
           </div>
         )}
       </main>
+
+      {/* ── Character side panels (direita) ─────────────────────── */}
+      <div className="char-panels">
+        {/* Box 1 — portrait 8-bit */}
+        <div className="char-panel-img">
+          <div className="text-[9px] text-slate-500 uppercase tracking-widest mb-2">
+            {character?.name ?? 'Personagem'}
+          </div>
+          <div className="pixel-placeholder">
+            {character?.char_type === 'ai_companion' ? '🤖' : '🧙'}
+          </div>
+          <div className="text-[10px] text-slate-400 mt-2 text-center leading-tight">
+            {character?.race ?? '—'} {character?.character_class ?? '—'}
+          </div>
+          <div className="text-[10px] text-amber-400 mt-0.5">Lv {character?.level ?? 1}</div>
+        </div>
+
+        {/* Box 2 — stats */}
+        <div className="char-panel-stats">
+          {(() => {
+            const hpCur = character?.status?.hp_current ?? 0
+            const hpMax = character?.status?.hp_max ?? 1
+            const hpPct = Math.max(0, Math.min(100, (hpCur / hpMax) * 100))
+            const hpClr = hpPct > 50 ? '#22c55e' : hpPct > 25 ? '#f59e0b' : '#ef4444'
+            const attrs = character?.attributes
+            const modOf = (v: number) => { const m = Math.floor((v - 10) / 2); return m >= 0 ? `+${m}` : `${m}` }
+            return (
+              <>
+                <div className="cstat-row">
+                  <span className="cstat-label">HP</span>
+                  <span className="cstat-value">{hpCur}/{hpMax}</span>
+                </div>
+                <div className="cstat-hp-bar">
+                  <div className="cstat-hp-fill" style={{ width: `${hpPct}%`, background: hpClr }} />
+                </div>
+                <div className="cstat-row">
+                  <span className="cstat-label">AC</span>
+                  <span className="cstat-value">{attrs?.armor_class ?? 10}</span>
+                </div>
+                <div className="cstat-row">
+                  <span className="cstat-label">Init</span>
+                  <span className="cstat-value">{modOf(attrs?.dexterity ?? 10)}</span>
+                </div>
+                <div className="cstat-row">
+                  <span className="cstat-label">Speed</span>
+                  <span className="cstat-value">{attrs?.speed ?? 30}ft</span>
+                </div>
+                <div className="cstat-row">
+                  <span className="cstat-label">Prof</span>
+                  <span className="cstat-value">+{character?.proficiency_bonus ?? 2}</span>
+                </div>
+                <div className="cstat-divider" />
+                <div className="text-[9px] text-slate-500 uppercase tracking-widest mb-1">Atributos</div>
+                <div className="cstat-attr-grid">
+                  {(['strength','dexterity','constitution','intelligence','wisdom','charisma'] as const).map((key) => (
+                    <div key={key} className="cstat-attr-box">
+                      <span className="cstat-attr-name">{key.slice(0,3).toUpperCase()}</span>
+                      <span className="cstat-attr-val">{attrs?.[key] ?? 10}</span>
+                      <span className="cstat-attr-mod">{modOf(attrs?.[key] ?? 10)}</span>
+                    </div>
+                  ))}
+                </div>
+                {(character?.status?.conditions ?? []).length > 0 && (
+                  <>
+                    <div className="cstat-divider" />
+                    <div className="flex flex-wrap gap-1">
+                      {character!.status!.conditions.map((c) => (
+                        <span key={c} className="condition-tag">{c}</span>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </>
+            )
+          })()}
+        </div>
+      </div>
     </div>
   )
 }

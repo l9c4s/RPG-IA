@@ -1046,6 +1046,8 @@ async def start_campaign_session(
     # Kick off opening narrative + map generation asynchronously.
     # _run_opening_flow creates its own DB session so it outlives this request.
     if not campaign.opening_generated:
+        campaign.init_status = "generating"
+        await db.flush()
         asyncio.create_task(_run_opening_flow(campaign_id, session.id))
 
     return {
