@@ -13,4 +13,4 @@ RUN pip install --no-cache-dir --upgrade pip && pip install --no-cache-dir .
 
 COPY . .
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8002"]
+CMD ["uvicorn", "presentation.main:app", "--host", "0.0.0.0", "--port", "8002"]
