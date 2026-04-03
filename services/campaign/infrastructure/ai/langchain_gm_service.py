@@ -67,9 +67,7 @@ def _build_gm_chain(retriever: BaseRetriever) -> RunnableWithMessageHistory:
         return "\n\n".join(d.page_content for d in docs)
 
     chain = (
-        RunnablePassthrough.assign(
-            context=lambda x: format_docs(retriever.invoke(x["question"]))
-        )
+        RunnablePassthrough.assign(context=lambda x: format_docs(retriever.invoke(x["question"])) )
         | prompt
         | llm
         | StrOutputParser()

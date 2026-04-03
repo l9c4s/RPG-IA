@@ -43,8 +43,7 @@ async def generate_character_8bit(
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Erro ao gerar a descrição 8-bit do personagem. Tente novamente.",
-        )
+            detail="Erro ao gerar a descrição 8-bit do personagem. Tente novamente.",)
 
 
 @router.post(

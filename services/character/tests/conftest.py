@@ -1,24 +1,38 @@
+"""Shared fixtures for all test layers (unit, integration, e2e)."""
+from __future__ import annotations
+
+import os
+import sys
+
 import pytest
 import pytest_asyncio
-import os
-from httpx import AsyncClient, ASGITransport
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-import sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+# Make service root importable from any test subdirectory
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import database
-from database import Base, get_db
-from main import app
+from domain.character.entity import Character, CharacterAttributes
+from infrastructure.database.connection import get_db
+from infrastructure.database.orm_models import Base
+from presentation.main import create_app
+
+# ---------------------------------------------------------------------------
+# Test database URL
+# ---------------------------------------------------------------------------
 
 TEST_DB_URL = (
     os.getenv(
         "DATABASE_URL",
-        "postgresql+asyncpg://rpg_user:change_me_strong_password@localhost:5432/rpg_platform"
+        "postgresql+asyncpg://rpg_user:change_me_strong_password@localhost:5432/rpg_platform",
     )
     .replace("@postgres:", "@localhost:")
     .replace("/rpg_platform", "/rpg_test")
 )
+
+# ---------------------------------------------------------------------------
+# Shared payload (reusable across e2e and integration)
+# ---------------------------------------------------------------------------
 
 CHARACTER_PAYLOAD = {
     "name": "Aragorn",
@@ -43,8 +57,14 @@ CHARACTER_PAYLOAD = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Database fixtures (integration + e2e)
+# ---------------------------------------------------------------------------
+
+
 @pytest_asyncio.fixture(scope="function")
-async def client():
+async def db_session():
+    """Isolated DB session — drops and recreates all tables per test function."""
     engine = create_async_engine(TEST_DB_URL, echo=False)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
@@ -58,36 +78,67 @@ async def client():
         autocommit=False,
     )
 
-    # Patch module-level AsyncSessionLocal so get_db uses our test factory
-    original_factory = database.AsyncSessionLocal
-    database.AsyncSessionLocal = factory
-
-    async def override_get_db():
-        async with factory() as session:
-            try:
-                yield session
-                await session.commit()
-            except Exception:
-                await session.rollback()
-                raise
-            finally:
-                await session.close()
-
-    app.dependency_overrides[get_db] = override_get_db
-
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        yield ac
-
-    app.dependency_overrides.clear()
-    database.AsyncSessionLocal = original_factory
+    async with factory() as session:
+        yield session
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
     await engine.dispose()
 
 
+# ---------------------------------------------------------------------------
+# ASGI HTTP client fixture (e2e)
+# ---------------------------------------------------------------------------
+
+
+@pytest_asyncio.fixture(scope="function")
+async def client(db_session):
+    """Full ASGI client with DB override — used for E2E tests."""
+
+    async def override_get_db():
+        yield db_session
+
+    app = create_app()
+    app.dependency_overrides[get_db] = override_get_db
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        yield ac
+
+    app.dependency_overrides.clear()
+
+
+# ---------------------------------------------------------------------------
+# Convenience fixtures
+# ---------------------------------------------------------------------------
+
+
 @pytest_asyncio.fixture
 async def created_character(client):
+    """Creates a character via HTTP and returns the JSON response."""
     r = await client.post("/characters", json=CHARACTER_PAYLOAD)
     assert r.status_code == 201
     return r.json()
+
+
+@pytest_asyncio.fixture
+async def sample_character():
+    """Domain Character entity ready to be saved by the repository."""
+    char = Character.create(
+        name="Aragorn",
+        race="Human",
+        class_="Ranger",
+        level=1,
+    )
+    char.attributes = CharacterAttributes.create_default(
+        char.id,
+        strength=15,
+        dexterity=14,
+        constitution=13,
+        intelligence=12,
+        wisdom=10,
+        charisma=8,
+        armor_class=12,
+        initiative=2,
+        speed=30,
+    )
+    return char

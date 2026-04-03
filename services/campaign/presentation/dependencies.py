@@ -41,8 +41,7 @@ from infrastructure.repositories.session_repository import MessageRepository, Se
 from presentation.websocket.connection_manager import manager
 
 VECTOR_DB_URL: str = os.getenv(
-    "VECTOR_DB_URL",
-    "postgresql+psycopg2://rpg:rpg@localhost:5432/rpg_campaign",
+    "VECTOR_DB_URL","postgresql+psycopg2://rpg:rpg@localhost:5432/rpg_campaign",
 )
 
 
