@@ -1,69 +1,87 @@
-import os
-import pytest
-import pytest_asyncio
-from httpx import AsyncClient, ASGITransport
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from unittest.mock import MagicMock, patch
+"""Shared fixtures for all test layers."""
+from __future__ import annotations
 
+import os
 import sys
+from unittest.mock import AsyncMock
+
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-import database
-from database import Base, get_db
-from main import app
+from infrastructure.database.connection import get_db
+from infrastructure.database.orm_models import Base
+from presentation.dependencies import get_dalle, get_minio
+from presentation.main import create_app
 
 TEST_DB_URL = (
     os.getenv(
         "DATABASE_URL",
-        "postgresql+asyncpg://rpg_user:change_me_strong_password@localhost:5432/rpg_platform"
+        "postgresql+asyncpg://rpg_user:change_me_strong_password@localhost:5432/rpg_platform",
     )
     .replace("@postgres:", "@localhost:")
     .replace("/rpg_platform", "/rpg_test")
 )
 
+_FAKE_BYTES = b"\x89PNG\r\n\x1a\n"
+_FAKE_URL = "/media/images/fake-image.png"
+
+
+# ---------------------------------------------------------------------------
+# DB session (integration + E2E)
+# ---------------------------------------------------------------------------
+
 
 @pytest_asyncio.fixture(scope="function")
-async def client():
+async def db_session():
     engine = create_async_engine(TEST_DB_URL, echo=False)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
-
-    factory = async_sessionmaker(
-        bind=engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-        autoflush=False,
-        autocommit=False,
-    )
-
-    original_factory = database.AsyncSessionLocal
-    database.AsyncSessionLocal = factory
-
-    async def override_get_db():
-        async with factory() as session:
-            try:
-                yield session
-                await session.commit()
-            except Exception:
-                await session.rollback()
-                raise
-            finally:
-                await session.close()
-
-    mock_minio = MagicMock()
-    mock_minio.bucket_exists.return_value = True
-    mock_minio.put_object.return_value = None
-
-    app.dependency_overrides[get_db] = override_get_db
-
-    with patch("main.minio_client", mock_minio):
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-            yield ac
-
-    app.dependency_overrides.clear()
-    database.AsyncSessionLocal = original_factory
-
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as session:
+        yield session
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
     await engine.dispose()
+
+
+# ---------------------------------------------------------------------------
+# Fake adapters (avoid real DALL-E / MinIO calls in E2E)
+# ---------------------------------------------------------------------------
+
+
+def _fake_dalle():
+    mock = AsyncMock()
+    mock.generate.return_value = _FAKE_BYTES
+    return mock
+
+
+def _fake_minio():
+    mock = AsyncMock()
+    mock.upload.return_value = _FAKE_URL
+    mock.ensure_bucket.return_value = None
+    return mock
+
+
+# ---------------------------------------------------------------------------
+# HTTP client (E2E)
+# ---------------------------------------------------------------------------
+
+
+@pytest_asyncio.fixture(scope="function")
+async def client(db_session: AsyncSession):
+    async def override_get_db():
+        yield db_session
+
+    app = create_app()
+    app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_dalle] = _fake_dalle
+    app.dependency_overrides[get_minio] = _fake_minio
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        yield ac
+
+    app.dependency_overrides.clear()
