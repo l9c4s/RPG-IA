@@ -55,7 +55,7 @@ services:
   # ─── Services ─────────────────────────────────────────────────────────────
   gateway:
     build: ./services/gateway
-    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    command: ["uvicorn", "presentation.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     env_file: .env
     volumes:
       - ./services/gateway:/app
@@ -70,7 +70,7 @@ services:
 
   pdf_service:
     build: ./services/pdf_ingestion
-    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8001", "--reload"]
+    command: ["uvicorn", "presentation.main:app", "--host", "0.0.0.0", "--port", "8001", "--reload"]
     env_file: .env
     volumes:
       - ./services/pdf_ingestion:/app
@@ -87,7 +87,7 @@ services:
 
   celery_worker:
     build: ./services/pdf_ingestion
-    command: celery -A worker.celery_app worker --loglevel=info -Q pdf_processing
+    command: celery -A infrastructure.worker.celery_app worker --loglevel=info -Q pdf_processing
     env_file: .env
     volumes:
       - ./services/pdf_ingestion:/app
@@ -102,7 +102,7 @@ services:
 
   celery_flower:
     build: ./services/pdf_ingestion
-    command: celery -A worker.celery_app flower --port=5555
+    command: celery -A infrastructure.worker.celery_app flower --port=5555
     env_file: .env
     volumes:
       - ./services/pdf_ingestion:/app
@@ -114,7 +114,7 @@ services:
 
   campaign_service:
     build: ./services/campaign
-    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8002", "--reload"]
+    command: ["uvicorn", "presentation.main:app", "--host", "0.0.0.0", "--port", "8002", "--reload"]
     env_file: .env
     volumes:
       - ./services/campaign:/app
@@ -129,7 +129,7 @@ services:
 
   character_service:
     build: ./services/character
-    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8003", "--reload"]
+    command: ["uvicorn", "presentation.main:app", "--host", "0.0.0.0", "--port", "8003", "--reload"]
     env_file: .env
     volumes:
       - ./services/character:/app
@@ -142,7 +142,7 @@ services:
 
   image_service:
     build: ./services/image_gen
-    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8004", "--reload"]
+    command: ["uvicorn", "presentation.main:app", "--host", "0.0.0.0", "--port", "8004", "--reload"]
     env_file: .env
     volumes:
       - ./services/image_gen:/app
@@ -155,7 +155,7 @@ services:
 
   tts_service:
     build: ./services/tts
-    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8005", "--reload"]
+    command: ["uvicorn", "presentation.main:app", "--host", "0.0.0.0", "--port", "8005", "--reload"]
     env_file: .env
     volumes:
       - ./services/tts:/app

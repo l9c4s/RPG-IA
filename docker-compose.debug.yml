@@ -1,66 +1,82 @@
-# Uso: docker compose -f docker-compose.yml -f docker-compose.debug.yml up -d
-# Ativa debugpy em cada serviço com porta dedicada.
-# O VS Code conecta via "Attach to Process" usando o launch.json.
-# Serviços sobem imediatamente — VS Code pode anexar a qualquer momento.
+# Debug override — usar junto com docker-compose.yml:
+#   docker compose -f docker-compose.yml -f docker-compose.debug.yml up -d
+#
+# Cada serviço Python escuta debugpy (DAP) em porta dedicada.
+# No VS Code: Run > "Python: Remote Attach" apontando para localhost:PORT.
+#
+# ATENÇÃO: --reload removido (conflita com debugger).
+# Mude código e dê docker compose restart <serviço> para recarregar.
 
 services:
+
+  # ── Gateway — DAP :5678 ─────────────────────────────────────────────────────
   gateway:
-    build: ./services/gateway
-    volumes:
-      - ./services/gateway:/app
-    environment:
-      DEBUG_PORT: "5678"
+    command: ["sh", "-c", "pip install debugpy -q && python -m debugpy --listen 0.0.0.0:5678 -m uvicorn presentation.main:app --host 0.0.0.0 --port 8000 --log-level debug"]
     ports:
       - "5678:5678"
-    command: ["/bin/sh", "debug_entrypoint.sh"]
-
-  campaign_service:
-    build: ./services/campaign
-    volumes:
-      - ./services/campaign:/app
+    restart: "no"
     environment:
-      DEBUG_PORT: "5679"
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+
+  # ── PDF Service — DAP :5679 ─────────────────────────────────────────────────
+  pdf_service:
+    command: ["sh", "-c", "pip install debugpy -q && python -m debugpy --listen 0.0.0.0:5679 -m uvicorn presentation.main:app --host 0.0.0.0 --port 8001 --log-level debug"]
     ports:
       - "5679:5679"
-    command: ["sh", "-c", "python -m debugpy --listen 0.0.0.0:5679 -m uvicorn main:app --host 0.0.0.0 --port 8002 --reload"]
-
-  pdf_service:
-    build: ./services/pdf_ingestion
-    volumes:
-      - ./services/pdf_ingestion:/app
+    restart: "no"
     environment:
-      DEBUG_PORT: "5680"
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+
+  # ── Campaign Service — DAP :5680 ────────────────────────────────────────────
+  campaign_service:
+    command: ["sh", "-c", "pip install debugpy -q && python -m debugpy --listen 0.0.0.0:5680 -m uvicorn presentation.main:app --host 0.0.0.0 --port 8002 --log-level debug"]
     ports:
       - "5680:5680"
-      - "8001:8001"
-    command: ["sh", "-c", "python -m debugpy --listen 0.0.0.0:5680 -m uvicorn main:app --host 0.0.0.0 --port 8001 --reload"]
-
-  character_service:
-    build: ./services/character
-    volumes:
-      - ./services/character:/app
+    restart: "no"
     environment:
-      DEBUG_PORT: "5681"
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+
+  # ── Character Service — DAP :5681 ───────────────────────────────────────────
+  character_service:
+    command: ["sh", "-c", "pip install debugpy -q && python -m debugpy --listen 0.0.0.0:5681 -m uvicorn presentation.main:app --host 0.0.0.0 --port 8003 --log-level debug"]
     ports:
       - "5681:5681"
-    command: ["sh", "-c", "python -m debugpy --listen 0.0.0.0:5681 -m uvicorn main:app --host 0.0.0.0 --port 8003 --reload"]
-
-  image_service:
-    build: ./services/image_gen
-    volumes:
-      - ./services/image_gen:/app
+    restart: "no"
     environment:
-      DEBUG_PORT: "5682"
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+
+  # ── Image Service — DAP :5682 ───────────────────────────────────────────────
+  image_service:
+    command: ["sh", "-c", "pip install debugpy -q && python -m debugpy --listen 0.0.0.0:5682 -m uvicorn presentation.main:app --host 0.0.0.0 --port 8004 --log-level debug"]
     ports:
       - "5682:5682"
-    command: ["sh", "-c", "python -m debugpy --listen 0.0.0.0:5682 -m uvicorn main:app --host 0.0.0.0 --port 8004 --reload"]
-
-  tts_service:
-    build: ./services/tts
-    volumes:
-      - ./services/tts:/app
+    restart: "no"
     environment:
-      DEBUG_PORT: "5683"
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+
+  # ── TTS Service — DAP :5683 ─────────────────────────────────────────────────
+  tts_service:
+    command: ["sh", "-c", "pip install debugpy -q && python -m debugpy --listen 0.0.0.0:5683 -m uvicorn presentation.main:app --host 0.0.0.0 --port 8005 --log-level debug"]
     ports:
       - "5683:5683"
-    command: ["sh", "-c", "python -m debugpy --listen 0.0.0.0:5683 -m uvicorn main:app --host 0.0.0.0 --port 8005 --reload"]
+    restart: "no"
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+
+  # ── Celery Worker — DAP :5684 ───────────────────────────────────────────────
+  # --pool=solo  → tasks rodam no processo principal (obrigatório para breakpoints)
+  # --loglevel=debug → output completo de cada task
+  celery_worker:
+    command: ["sh", "-c", "pip install debugpy -q && python -m debugpy --listen 0.0.0.0:5684 -m celery -A infrastructure.worker.celery_app worker --loglevel=debug --pool=solo -Q pdf_processing"]
+    ports:
+      - "5684:5684"
+    restart: "no"
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
