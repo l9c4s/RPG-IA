@@ -20,8 +20,11 @@ celery_app.conf.update(
     enable_utc=True,
     task_acks_late=True,
     worker_prefetch_multiplier=1,
+    broker_connection_retry_on_startup=True,
 )
 
 celery_app.conf.task_routes = {
     "infrastructure.worker.tasks.process_pdf": {"queue": "pdf_processing"},
 }
+
+celery_app.autodiscover_tasks(["infrastructure.worker"])
