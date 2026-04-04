@@ -438,6 +438,7 @@ export default function CharacterSheet(): React.ReactElement {
   useAuth() // ensure auth context is mounted; redirects on 401
 
   const [characters,    setCharacters]    = useState<Character[]>([])
+  const [charImages,    setCharImages]    = useState<Record<string, string>>({})
   const [activeIdx,     setActiveIdx]     = useState(0)
   const [editMode,      setEditMode]      = useState(false)
   const [draft,         setDraft]         = useState<Character | null>(null)
@@ -454,6 +455,21 @@ export default function CharacterSheet(): React.ReactElement {
     try {
       const data = await api.get<Character[]>(`/campaigns/${campaignId}/characters`)
       setCharacters(data)
+
+      // Busca imagens de todos os personagens em paralelo (ignora 404)
+      const imageEntries = await Promise.all(
+        data.map(async (c) => {
+          try {
+            const img = await api.get<{ image_url: string }>(`/images/character/${c.id}`)
+            return [c.id, img.image_url] as const
+          } catch {
+            return null
+          }
+        })
+      )
+      setCharImages(
+        Object.fromEntries(imageEntries.filter((e): e is [string, string] => e !== null))
+      )
     } catch {
       setError('Failed to load characters.')
     } finally {
@@ -573,41 +589,68 @@ export default function CharacterSheet(): React.ReactElement {
           <div className="space-y-6">
             {/* ── Header ── */}
             <div className="card-rune p-6">
-              <div className="flex flex-col sm:flex-row gap-4 items-start justify-between">
-                <div className="space-y-1">
-                  {editMode && draft ? (
-                    <input
-                      value={draft.name}
-                      onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-                      className="input-dark text-2xl font-serif font-bold bg-transparent border-x-0 border-t-0 rounded-none px-0 py-1 text-amber-400"
+              <div className="flex gap-5 items-start">
+
+                {/* Imagem do personagem */}
+                <div className="shrink-0">
+                  {charImages[ch.id] ? (
+                    <img
+                      src={charImages[ch.id]}
+                      alt={ch.name}
+                      className="w-28 h-28 rounded-lg object-cover border-2 border-amber-700/50 shadow-lg"
+                      style={{ imageRendering: 'pixelated' }}
                     />
                   ) : (
-                    <h1 className="text-2xl font-serif text-amber-400">{ch.name}</h1>
+                    <div className="w-28 h-28 rounded-lg border-2 border-slate-700/50 bg-slate-800/60 flex items-center justify-center">
+                      <Users className="w-10 h-10 text-slate-600" />
+                    </div>
                   )}
-                  <p className="text-slate-400 text-sm font-serif">
-                    {ch.race} ·{' '}
-                    {ch.character_class}{ch.subclass ? ` (${ch.subclass})` : ''} ·{' '}
-                    Level {ch.level}
-                  </p>
-                  <p className="text-slate-500 text-xs font-serif italic">{ch.alignment} · {ch.background}</p>
                 </div>
-                <div className="flex items-center gap-3 shrink-0">
-                  <div className="stat-box">
-                    <Shield className="w-3 h-3 text-blue-400" />
-                    <p className="text-xl font-bold text-slate-100">{attrs.armor_class}</p>
-                    <p className="text-xs text-slate-500">AC</p>
+
+                {/* Info + stats */}
+                <div className="flex-1 flex flex-col sm:flex-row gap-4 items-start justify-between min-w-0">
+                  <div className="space-y-1 min-w-0">
+                    {editMode && draft ? (
+                      <input
+                        value={draft.name}
+                        onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                        className="input-dark text-2xl font-serif font-bold bg-transparent border-x-0 border-t-0 rounded-none px-0 py-1 text-amber-400"
+                      />
+                    ) : (
+                      <h1 className="text-2xl font-serif text-amber-400">{ch.name}</h1>
+                    )}
+                    <p className="text-slate-400 text-sm font-serif">
+                      {ch.race} ·{' '}
+                      {ch.character_class}{ch.subclass ? ` (${ch.subclass})` : ''} ·{' '}
+                      Level {ch.level}
+                    </p>
+                    <p className="text-slate-500 text-xs font-serif italic">{ch.alignment} · {ch.background}</p>
+                    {ch.char_type === 'ai_companion' && (
+                      <span className="inline-flex items-center gap-1 text-xs text-indigo-400 font-serif">
+                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 inline-block" />
+                        AI Companion
+                      </span>
+                    )}
                   </div>
-                  <div className="stat-box">
-                    <Zap className="w-3 h-3 text-amber-400" />
-                    <p className="text-xl font-bold text-slate-100">{attrs.speed}</p>
-                    <p className="text-xs text-slate-500">Speed</p>
-                  </div>
-                  <div className="stat-box">
-                    <Star className="w-3 h-3 text-yellow-400" />
-                    <p className="text-xl font-bold text-slate-100">+{proficiencyBonus(ch.level)}</p>
-                    <p className="text-xs text-slate-500">Prof</p>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <div className="stat-box">
+                      <Shield className="w-3 h-3 text-blue-400" />
+                      <p className="text-xl font-bold text-slate-100">{attrs.armor_class}</p>
+                      <p className="text-xs text-slate-500">AC</p>
+                    </div>
+                    <div className="stat-box">
+                      <Zap className="w-3 h-3 text-amber-400" />
+                      <p className="text-xl font-bold text-slate-100">{attrs.speed}</p>
+                      <p className="text-xs text-slate-500">Speed</p>
+                    </div>
+                    <div className="stat-box">
+                      <Star className="w-3 h-3 text-yellow-400" />
+                      <p className="text-xl font-bold text-slate-100">+{proficiencyBonus(ch.level)}</p>
+                      <p className="text-xs text-slate-500">Prof</p>
+                    </div>
                   </div>
                 </div>
+
               </div>
             </div>
 
