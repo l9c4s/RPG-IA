@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   Sword, Users, Plus, AlertCircle, ChevronLeft, Eye, Play,
-  Loader2, BookOpen, Map, CheckCircle, XCircle,
+  Loader2, BookOpen, Map, CheckCircle, XCircle, Bot,
 } from 'lucide-react'
 import { api } from '../api/client'
 import { useAuth } from '../hooks/useAuth'
@@ -86,6 +86,7 @@ export default function Lobby(): React.ReactElement {
   const [session,          setSession]          = useState<SessionInfo | null>(null)
   const [isLoading,        setIsLoading]        = useState(true)
   const [isStarting,       setIsStarting]       = useState(false)
+  const [isAddingAI,       setIsAddingAI]       = useState(false)
   const [startError,       setStartError]       = useState<string | null>(null)
   const [error,            setError]            = useState<string | null>(null)
   const [showCreateModal,  setShowCreateModal]  = useState(false)
@@ -140,6 +141,23 @@ export default function Lobby(): React.ReactElement {
     }, 3000)
     return () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null } }
   }, [campaignId, session?.init_status]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const MAX_AI_COMPANIONS = 4
+  const aiCount = characters.filter((c) => c.char_type === 'ai_companion').length
+
+  const handleAddAIPlayer = async () => {
+    if (!campaignId) return
+    setIsAddingAI(true)
+    try {
+      const newChar = await api.post<Character>(`/campaigns/${campaignId}/ai-player`, {})
+      setCharacters((prev) => [...prev, newChar])
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Erro ao gerar companheiro IA. Tente novamente.'
+      setStartError(msg)
+    } finally {
+      setIsAddingAI(false)
+    }
+  }
 
   const handleStartSession = async () => {
     if (!campaignId) return
@@ -234,27 +252,41 @@ export default function Lobby(): React.ReactElement {
               </p>
             ) : (
               <div className="space-y-3">
-                {characters.map((char) => (
-                  <div
-                    key={char.id}
-                    className="flex items-center justify-between p-3 bg-slate-800/50 rounded-lg border border-slate-700/40"
-                  >
-                    <div>
-                      <p className="text-slate-200 font-semibold text-sm">{char.name}</p>
-                      <p className="text-slate-500 text-xs">
-                        Level {char.level} {char.character_class} · {char.race}
-                      </p>
+                {characters.map((char) => {
+                  const isAI = char.char_type === 'ai_companion'
+                  return (
+                    <div
+                      key={char.id}
+                      className={`flex items-center justify-between p-3 rounded-lg border ${
+                        isAI
+                          ? 'bg-indigo-950/40 border-indigo-700/40'
+                          : 'bg-slate-800/50 border-slate-700/40'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        {isAI && (
+                          <Bot className="w-4 h-4 text-indigo-400 shrink-0" />
+                        )}
+                        <div>
+                          <p className="text-slate-200 font-semibold text-sm">{char.name}</p>
+                          <p className="text-slate-500 text-xs">
+                            Level {char.level} {char.character_class} · {char.race}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {isAI ? (
+                          <Badge variant="info">AI Companion</Badge>
+                        ) : char.owner_id === String(user?.id) ? (
+                          <Badge variant="success">You</Badge>
+                        ) : null}
+                        <span className="text-slate-400 text-xs">
+                          HP {char.status?.hp_current ?? 0}/{char.status?.hp_max ?? 0}
+                        </span>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      {char.owner_id === String(user?.id) && (
-                        <Badge variant="success">You</Badge>
-                      )}
-                      <span className="text-slate-400 text-xs">
-                        HP {char.status?.hp_current ?? 0}/{char.status?.hp_max ?? 0}
-                      </span>
-                    </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             )}
           </div>
@@ -269,6 +301,12 @@ export default function Lobby(): React.ReactElement {
             <div className="flex items-center gap-2 bg-amber-900/30 border border-amber-700/50 rounded-lg px-4 py-3 text-amber-300 text-sm font-serif italic">
               <AlertCircle className="w-4 h-4 shrink-0" />
               Crie pelo menos 1 personagem para iniciar a sessão.
+            </div>
+          )}
+          {aiCount >= MAX_AI_COMPANIONS && (
+            <div className="flex items-center gap-2 bg-indigo-900/30 border border-indigo-700/50 rounded-lg px-4 py-3 text-indigo-300 text-sm font-serif italic">
+              <Bot className="w-4 h-4 shrink-0" />
+              Limite de {MAX_AI_COMPANIONS} companheiros IA atingido.
             </div>
           )}
           {startError && (
@@ -323,6 +361,16 @@ export default function Lobby(): React.ReactElement {
               className="flex-1 justify-center"
             >
               Criar Personagem
+            </Button>
+            <Button
+              variant="ghost"
+              leftIcon={isAddingAI ? <Loader2 className="w-4 h-4 animate-spin" /> : <Bot className="w-4 h-4" />}
+              onClick={() => void handleAddAIPlayer()}
+              isLoading={isAddingAI}
+              disabled={isAddingAI || aiCount >= MAX_AI_COMPANIONS}
+              className="flex-1 justify-center text-indigo-400 hover:text-indigo-300 hover:border-indigo-700/50 disabled:opacity-40"
+            >
+              Adicionar IA {aiCount > 0 && `(${aiCount}/${MAX_AI_COMPANIONS})`}
             </Button>
           </div>
         </div>

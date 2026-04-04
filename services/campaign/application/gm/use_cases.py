@@ -47,8 +47,8 @@ class GenerateOpeningNarrativeUseCase:
             if campaign is None:
                 return
 
-            # Guard contra double-trigger
-            if campaign.init_status.value == "generating":
+            # Guard contra double-trigger (só pula se já concluído ou falhado)
+            if campaign.opening_generated or campaign.init_status.value in ("ready", "failed"):
                 return
 
             campaign.start_generating_opening()

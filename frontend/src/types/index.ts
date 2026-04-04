@@ -52,16 +52,18 @@ export interface Campaign {
   updated_at:       string
   session_count?:   number
   player_count?:    number
+  ai_players?:      Record<string, unknown>[]
 }
 
 export type CampaignStatusType = Campaign['status']
 
 export interface CreateCampaignRequest {
-  title:       string
-  description: string
-  rpg_system:  string
-  difficulty?: string
-  tone?:       string
+  title:            string
+  description:      string
+  rpg_system:       string
+  difficulty?:      string
+  tone?:            string
+  ai_players_count?: number
 }
 
 // ─────────────────────────────────────────────

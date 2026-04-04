@@ -15,6 +15,7 @@ class CampaignCreateRequest(BaseModel):
     rpg_system: str = Field(..., min_length=1, max_length=100)
     difficulty: str = Field(default="medium", pattern="^(easy|medium|hard)$")
     tone: str = Field(default="heroic", max_length=100)
+    ai_players_count: int = Field(default=0, ge=0, le=4, description="Número de jogadores IA gerados automaticamente ao criar a campanha (0–4)")
 
 
 class CampaignStatusUpdateRequest(BaseModel):
@@ -31,6 +32,7 @@ class CampaignResponse(BaseModel):
     description: Optional[str]
     created_at: Optional[str]
     updated_at: Optional[str]
+    ai_players: list[dict] = Field(default_factory=list)
 
 
 class LobbyResponse(BaseModel):

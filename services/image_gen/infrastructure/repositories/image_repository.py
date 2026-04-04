@@ -80,3 +80,13 @@ class GeneratedImageRepository:
             select(GeneratedImageDB).where(GeneratedImageDB.campaign_id == campaign_id)
         )
         return [self._to_domain(row) for row in result.scalars().all()]
+
+    async def get_latest_by_character(self, character_id: UUID) -> GeneratedImage | None:
+        result = await self._session.execute(
+            select(GeneratedImageDB)
+            .where(GeneratedImageDB.character_id == character_id)
+            .order_by(GeneratedImageDB.created_at.desc())
+            .limit(1)
+        )
+        orm = result.scalar_one_or_none()
+        return self._to_domain(orm) if orm else None

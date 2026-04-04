@@ -40,6 +40,10 @@ class IGMService(Protocol):
         """Gera conceito de personagem 8-bit a partir de uma descrição."""
         ...
 
+    async def generate_ai_companion_archetype(self) -> dict:
+        """Gera aleatoriamente um arquétipo de companheiro IA (name, class, race, personality, backstory)."""
+        ...
+
 
 class IKnowledgeRetriever(Protocol):
     """

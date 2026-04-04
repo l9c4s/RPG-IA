@@ -1,5 +1,7 @@
-"""Image generation router — /generate/*."""
+"""Image generation router — /generate/* and /images/*."""
 from __future__ import annotations
+
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
@@ -15,11 +17,13 @@ from application.image.use_cases import (
     GenerateNpcImageUseCase,
     GenerateSceneUseCase,
 )
+from infrastructure.repositories.image_repository import GeneratedImageRepository
 from presentation.dependencies import (
     get_generate_character_uc,
     get_generate_map_uc,
     get_generate_npc_uc,
     get_generate_scene_uc,
+    get_image_repo,
 )
 from presentation.schemas.image import (
     GenerateCharacterRequest,
@@ -36,6 +40,21 @@ def _dto_to_response(dto) -> ImageResponse:
         image_id=str(dto.id),
         image_url=dto.image_url,
         image_type=dto.image_type,
+    )
+
+
+@router.get("/images/character/{character_id}", response_model=ImageResponse)
+async def get_character_image(
+    character_id: UUID,
+    repo: GeneratedImageRepository = Depends(get_image_repo),
+):
+    image = await repo.get_latest_by_character(character_id)
+    if not image:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No image found for this character")
+    return ImageResponse(
+        image_id=str(image.id),
+        image_url=str(image.image_url),
+        image_type=image.image_type.value,
     )
 
 

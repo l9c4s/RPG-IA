@@ -15,6 +15,7 @@ class CreateCampaignDTO:
     difficulty: str
     tone: str
     description: Optional[str] = None
+    ai_players_count: int = 0
 
 
 @dataclass
@@ -34,6 +35,7 @@ class CampaignResponseDTO:
     description: Optional[str]
     created_at: Optional[str]
     updated_at: Optional[str]
+    ai_players: list = field(default_factory=list)
 
 
 @dataclass

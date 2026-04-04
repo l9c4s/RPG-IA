@@ -87,8 +87,10 @@ def get_character_client() -> CharacterServiceClient:
 
 def get_create_campaign_uc(
     repo: CampaignRepository = Depends(get_campaign_repo),
+    gm: LangchainGMService = Depends(get_gm_service),
+    chars: CharacterServiceClient = Depends(get_character_client),
 ) -> CreateCampaignUseCase:
-    return CreateCampaignUseCase(repo)
+    return CreateCampaignUseCase(repo, gm, chars)
 
 
 def get_list_campaigns_uc(
@@ -126,8 +128,10 @@ def get_delete_campaign_uc(
 def get_add_ai_player_uc(
     repo: CampaignRepository = Depends(get_campaign_repo),
     chars: CharacterServiceClient = Depends(get_character_client),
+    gm: LangchainGMService = Depends(get_gm_service),
+    image: ImageClient = Depends(get_image_client),
 ) -> AddAIPlayerUseCase:
-    return AddAIPlayerUseCase(repo, chars)
+    return AddAIPlayerUseCase(repo, chars, gm, image)
 
 
 def get_campaign_locations_uc(

@@ -201,6 +201,44 @@ class LangchainGMService:
                 raw = raw[4:]
         return json.loads(raw)
 
+    async def generate_ai_companion_archetype(self) -> dict:
+        """Gera aleatoriamente um arquétipo de companheiro IA via GPT-4o."""
+        from langchain_core.output_parsers import JsonOutputParser
+        from langchain_core.prompts import PromptTemplate
+
+        parser = JsonOutputParser()
+
+        prompt = PromptTemplate(
+            template=(
+                "You are a creative tabletop RPG character designer.\n"
+                "Generate a completely original and random RPG companion character archetype.\n"
+                "Be creative — avoid clichés, mix unexpected races and classes, invent unique names.\n"
+                "Return ONLY a valid JSON object with exactly these fields:\n"
+                "  \"name\": unique character name,\n"
+                "  \"class\": RPG class (e.g. Fighter, Warlock, Druid, Paladin, Ranger, Monk...),\n"
+                "  \"race\": fantasy race (e.g. Tiefling, Gnome, Dragonborn, Aasimar, Tabaxi...),\n"
+                "  \"personality\": 1 sentence describing their personality traits,\n"
+                "  \"backstory\": 1 sentence describing their origin and motivation.\n"
+                "No markdown, no explanation, only the JSON object.\n\n"
+                "Random seed for variety: {seed}"
+            ),
+            input_variables=["seed"],
+        )
+
+        llm = ChatOpenAI(
+            model="gpt-4o",
+            temperature=1.0,
+            api_key=os.getenv("OPENAI_API_KEY"),
+        )
+
+        chain = prompt | llm | parser
+
+        import random as _random
+        seed = _random.randint(0, 999999)
+
+        result = await asyncio.to_thread(chain.invoke, {"seed": seed})
+        return result
+
     async def generate_character_8bit(self, description: str) -> dict:
         """Gera conceito de personagem 8-bit a partir de uma descrição."""
         prompt = (

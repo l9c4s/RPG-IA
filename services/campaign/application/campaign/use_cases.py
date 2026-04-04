@@ -5,7 +5,6 @@ Dependências chegam por injeção via construtor (interfaces, não implementaç
 """
 
 import logging
-import random
 from uuid import UUID
 
 from application.campaign.dtos import (
@@ -19,48 +18,13 @@ from application.campaign.dtos import (
 from domain.campaign.entity import Campaign
 from domain.campaign.repository import ICampaignRepository
 from domain.gm.ports import IGMService
-from infrastructure.external.image_client import CharacterServiceClient
+from infrastructure.external.image_client import CharacterServiceClient, ImageClient
 
 logger = logging.getLogger(__name__)
 
-# Arquétipos disponíveis para companheiros de IA
-_AI_ARCHETYPES = [
-    {
-        "name": "Aria",
-        "class": "Bard",
-        "race": "Half-Elf",
-        "personality": "Curious and witty, loves stories and lore",
-        "backstory": "A wandering bard collecting tales from across the realms.",
-    },
-    {
-        "name": "Gorak",
-        "class": "Barbarian",
-        "race": "Half-Orc",
-        "personality": "Fierce but loyal, speaks little and acts much",
-        "backstory": "A former gladiator seeking redemption through honorable battle.",
-    },
-    {
-        "name": "Sylvara",
-        "class": "Wizard",
-        "race": "Elf",
-        "personality": "Analytical and cautious, always planning ahead",
-        "backstory": "An elven scholar banished from her tower for forbidden research.",
-    },
-    {
-        "name": "Brother Aldric",
-        "class": "Cleric",
-        "race": "Human",
-        "personality": "Compassionate and devout, never abandons the wounded",
-        "backstory": "A traveling healer ministering to those caught between wars.",
-    },
-    {
-        "name": "Nimble",
-        "class": "Rogue",
-        "race": "Halfling",
-        "personality": "Cheerful and opportunistic, trouble finds them naturally",
-        "backstory": "A former street thief turned reluctant adventurer.",
-    },
-]
+
+class LimitExceededError(ValueError):
+    """Raised when a campaign resource limit is exceeded."""
 
 
 def _campaign_to_response_dto(campaign: Campaign) -> CampaignResponseDTO:
@@ -78,8 +42,15 @@ def _campaign_to_response_dto(campaign: Campaign) -> CampaignResponseDTO:
 
 
 class CreateCampaignUseCase:
-    def __init__(self, campaign_repo: ICampaignRepository) -> None:
+    def __init__(
+        self,
+        campaign_repo: ICampaignRepository,
+        gm_service: IGMService | None = None,
+        character_client: CharacterServiceClient | None = None,
+    ) -> None:
         self._repo = campaign_repo
+        self._gm = gm_service
+        self._characters = character_client
 
     async def execute(self, dto: CreateCampaignDTO) -> CampaignResponseDTO:
         campaign = Campaign.create(
@@ -90,7 +61,31 @@ class CreateCampaignUseCase:
             description=dto.description,
         )
         saved = await self._repo.save(campaign)
-        return _campaign_to_response_dto(saved)
+        response = _campaign_to_response_dto(saved)
+
+        if dto.ai_players_count > 0 and self._gm and self._characters:
+            import asyncio
+            tasks = [self._gm.generate_ai_companion_archetype() for _ in range(dto.ai_players_count)]
+            archetypes = await asyncio.gather(*tasks, return_exceptions=True)
+            for archetype in archetypes:
+                if isinstance(archetype, Exception):
+                    logger.warning("Falha ao gerar arquétipo IA: %s", archetype)
+                    continue
+                try:
+                    character = await self._characters.create_character({
+                        "name": archetype["name"],
+                        "class": archetype["class"],
+                        "race": archetype["race"],
+                        "char_type": "ai_companion",
+                        "backstory": archetype["backstory"],
+                        "campaign_id": str(saved.id),
+                        "level": 1,
+                    })
+                    response.ai_players.append(character)
+                except Exception as exc:
+                    logger.warning("Falha ao criar personagem IA: %s", exc)
+
+        return response
 
 
 class GetCampaignUseCase:
@@ -180,25 +175,61 @@ class AddAIPlayerUseCase:
         self,
         campaign_repo: ICampaignRepository,
         character_client: CharacterServiceClient,
+        gm_service: IGMService,
+        image_client: ImageClient | None = None,
     ) -> None:
         self._repo = campaign_repo
         self._characters = character_client
+        self._gm = gm_service
+        self._images = image_client
+
+    MAX_AI_COMPANIONS = 4
 
     async def execute(self, dto: AddAIPlayerDTO) -> dict:
+        import asyncio
+
         campaign = await self._repo.get_by_id(dto.campaign_id)
         if campaign is None:
             raise ValueError(f"Campanha {dto.campaign_id} não encontrada.")
 
-        archetype = random.choice(_AI_ARCHETYPES)
-        return await self._characters.create_character({
-            "name": archetype["name"],
-            "class": archetype["class"],
-            "race": archetype["race"],
+        # Valida limite de companheiros IA
+        existing = await self._characters.list_campaign_characters(str(dto.campaign_id))
+        ai_count = sum(1 for c in existing if c.get("char_type") == "ai_companion")
+        if ai_count >= self.MAX_AI_COMPANIONS:
+            raise LimitExceededError(
+                f"Limite de {self.MAX_AI_COMPANIONS} companheiros IA atingido para esta campanha."
+            )
+
+        # Gera conceito 8-bit completo: nome, raça, classe, aparência, backstory, pixel_art_prompt
+        concept = await self._gm.generate_character_8bit(
+            "a unique and interesting fantasy RPG adventurer companion"
+        )
+
+        character = await self._characters.create_character({
+            "name": concept.get("name"),
+            "class": concept.get("class"),
+            "race": concept.get("race"),
             "char_type": "ai_companion",
-            "backstory": archetype["backstory"],
+            "backstory": concept.get("backstory"),
+            "appearance": concept.get("appearance"),
+            "alignment": concept.get("alignment"),
+            "background": concept.get("background"),
             "campaign_id": str(dto.campaign_id),
             "level": 1,
         })
+
+        # Gera imagem 8-bit em background (não bloqueia a resposta)
+        pixel_prompt = concept.get("pixel_art_prompt")
+        if pixel_prompt and self._images and character.get("id"):
+            asyncio.create_task(
+                self._images.generate_character_image(
+                    description=pixel_prompt,
+                    character_id=str(character["id"]),
+                    campaign_id=str(dto.campaign_id),
+                )
+            )
+
+        return character
 
 
 class GetCampaignLocationsUseCase:

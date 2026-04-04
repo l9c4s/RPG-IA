@@ -33,6 +33,32 @@ class ImageClient:
             logger.warning("Image generation dispatch falhou: %s", exc)
         return None
 
+    async def generate_character_image(
+        self,
+        description: str,
+        character_id: str,
+        campaign_id: str,
+    ) -> str | None:
+        """
+        Solicita geração de imagem de personagem (pixel art 8-bit) via DALL·E 3.
+        Retorna a URL da imagem ou None em caso de falha.
+        """
+        try:
+            async with httpx.AsyncClient(timeout=90.0) as client:
+                resp = await client.post(
+                    f"{IMAGE_SERVICE_URL}/generate/character",
+                    json={
+                        "description": description,
+                        "character_id": character_id,
+                        "campaign_id": campaign_id,
+                    },
+                )
+                if resp.status_code in (200, 201):
+                    return resp.json().get("image_url")
+        except Exception as exc:
+            logger.warning("Character image generation falhou: %s", exc)
+        return None
+
 
 class CharacterServiceClient:
     """Cliente HTTP para o serviço de personagens."""

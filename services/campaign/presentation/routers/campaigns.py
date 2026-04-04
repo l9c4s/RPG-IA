@@ -22,6 +22,7 @@ from application.campaign.use_cases import (
     GetCampaignLocationsUseCase,
     GetCampaignUseCase,
     GetLobbyUseCase,
+    LimitExceededError,
     ListCampaignsUseCase,
     UpdateCampaignStatusUseCase,
 )
@@ -65,6 +66,7 @@ async def create_campaign(
         difficulty=body.difficulty,
         tone=body.tone,
         description=body.description,
+        ai_players_count=body.ai_players_count,
     )
     result = await uc.execute(dto)
     return CampaignResponse(**vars(result))
@@ -136,6 +138,8 @@ async def add_ai_player(
 ) -> dict:
     try:
         return await uc.execute(AddAIPlayerDTO(campaign_id=campaign_id))
+    except LimitExceededError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     except Exception as exc:
