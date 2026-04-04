@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Sword, Plus, Book, Map, Users, Trash2,
-  ChevronRight, AlertCircle, BookOpen, Clock,
+  ChevronRight, AlertCircle, BookOpen, Clock, Bot,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
@@ -42,11 +42,12 @@ interface CreateCampaignFormProps {
 }
 
 function CreateCampaignForm({ onClose, onCreate }: CreateCampaignFormProps): React.ReactElement {
-  const [title,       setTitle]       = useState('')
-  const [description, setDescription] = useState('')
-  const [rpgSystem,   setRpgSystem]   = useState('D&D 5e')
-  const [isLoading,   setIsLoading]   = useState(false)
-  const [error,       setError]       = useState<string | null>(null)
+  const [title,           setTitle]           = useState('')
+  const [description,     setDescription]     = useState('')
+  const [rpgSystem,       setRpgSystem]       = useState('D&D 5e')
+  const [aiPlayersCount,  setAiPlayersCount]  = useState(0)
+  const [isLoading,       setIsLoading]       = useState(false)
+  const [error,           setError]           = useState<string | null>(null)
 
   async function handleSubmit(e: React.FormEvent): Promise<void> {
     e.preventDefault()
@@ -56,9 +57,10 @@ function CreateCampaignForm({ onClose, onCreate }: CreateCampaignFormProps): Rea
     setError(null)
     try {
       const payload: CreateCampaignRequest = {
-        title:       title.trim(),
-        description: description.trim(),
-        rpg_system:  rpgSystem,
+        title:            title.trim(),
+        description:      description.trim(),
+        rpg_system:       rpgSystem,
+        ai_players_count: aiPlayersCount,
       }
       const campaign = await api.post<Campaign>('/campaigns', payload)
       onCreate(campaign)
@@ -110,6 +112,34 @@ function CreateCampaignForm({ onClose, onCreate }: CreateCampaignFormProps): Rea
           className="input-dark resize-none h-24"
           maxLength={500}
         />
+      </div>
+
+      <div>
+        <label className="label-rune flex items-center gap-1.5">
+          <Bot className="w-3.5 h-3.5 text-amber-600" />
+          AI Players at the Table
+        </label>
+        <div className="flex gap-2 mt-1.5">
+          {([0, 1, 2, 3, 4] as const).map((n) => (
+            <button
+              key={n}
+              type="button"
+              onClick={() => setAiPlayersCount(n)}
+              className={`flex-1 py-2 rounded border text-sm font-serif transition-all ${
+                aiPlayersCount === n
+                  ? 'bg-amber-600/30 border-amber-600/60 text-amber-300'
+                  : 'bg-transparent border-slate-700 text-slate-500 hover:border-amber-700/50 hover:text-slate-300'
+              }`}
+            >
+              {n === 0 ? 'None' : n}
+            </button>
+          ))}
+        </div>
+        {aiPlayersCount > 0 && (
+          <p className="text-slate-500 text-xs mt-1.5 font-serif italic">
+            {aiPlayersCount} AI companion{aiPlayersCount > 1 ? 's' : ''} will be generated and added to the campaign.
+          </p>
+        )}
       </div>
 
       <div className="flex gap-3 pt-2">
