@@ -15,7 +15,7 @@ from application.character.dtos import (
     UpdateCharacterDTO,
     UpdateCharacterStatusDTO,
 )
-from domain.character.entity import Ability, Character, CharacterAttributes, InventoryItem
+from domain.character.entity import Ability, Character, CharacterAttributes, CharacterStatus, InventoryItem, calc_initial_hp
 from domain.character.repository import ICharacterRepository
 
 
@@ -147,10 +147,15 @@ class CreateCharacterUseCase:
             campaign_id=dto.campaign_id,
             owner_id=dto.owner_id,
         )
-        character.status = None  # repo will initialize
         character.attributes = CharacterAttributes.create_default(
             character.id, **attrs_overrides
         )
+
+        constitution = character.attributes.constitution
+        initial_hp = calc_initial_hp(dto.class_, constitution, dto.level)
+        character.status = CharacterStatus.create_default(character.id)
+        character.status.hp_max = initial_hp
+        character.status.hp_current = initial_hp
 
         saved = await self._repo.save(character)
         return _character_to_dto(saved)

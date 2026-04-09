@@ -4,7 +4,7 @@ Rotas HTTP de Sessão — borda da aplicação.
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
 from application.session.dtos import PlayerActionDTO, StartSessionDTO
 from application.session.use_cases import (
@@ -13,9 +13,9 @@ from application.session.use_cases import (
     ProcessPlayerTurnUseCase,
     StartCampaignSessionUseCase,
 )
+from presentation.background_tasks import run_opening_background
 from presentation.dependencies import (
     get_current_session_uc,
-    get_opening_narrative_uc,
     get_process_turn_uc,
     get_session_messages_uc,
     get_start_session_uc,
@@ -26,7 +26,6 @@ from presentation.schemas.session import (
     PlayerActionRequest,
     SessionResponse,
 )
-from application.gm.use_cases import GenerateOpeningNarrativeUseCase
 
 router = APIRouter(tags=["sessions"])
 
@@ -76,15 +75,16 @@ async def session_action(
 )
 async def start_campaign_session(
     campaign_id: UUID,
+    background_tasks: BackgroundTasks,
     start_uc: StartCampaignSessionUseCase = Depends(get_start_session_uc),
-    opening_uc: GenerateOpeningNarrativeUseCase = Depends(get_opening_narrative_uc),
 ) -> SessionResponse:
     """Inicia uma nova sessão e dispara a abertura em background se necessário."""
     try:
-        result = await start_uc.execute(
-            StartSessionDTO(campaign_id=campaign_id),
-            opening_task_fn=opening_uc.execute,
-        )
+        result = await start_uc.execute(StartSessionDTO(campaign_id=campaign_id))
+        if not result.has_opening:
+            background_tasks.add_task(
+                run_opening_background, campaign_id, UUID(result.id)
+            )
         return SessionResponse(**vars(result))
     except ValueError as exc:
         code = (

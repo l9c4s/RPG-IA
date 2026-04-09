@@ -21,6 +21,7 @@ class Campaign:
     status: CampaignStatus
     init_status: InitStatus
     opening_generated: bool
+    ai_players_count: int = 0
     description: Optional[str] = None
     locations_json: Optional[str] = None
     created_at: Optional[datetime] = None
@@ -34,6 +35,7 @@ class Campaign:
         difficulty: str,
         tone: str,
         description: Optional[str] = None,
+        ai_players_count: int = 0,
     ) -> "Campaign":
         """Cria uma nova campanha no status inicial (lobby)."""
         return cls(
@@ -45,6 +47,7 @@ class Campaign:
             status=CampaignStatus.LOBBY,
             init_status=InitStatus.IDLE,
             opening_generated=False,
+            ai_players_count=ai_players_count,
             description=description,
         )
 

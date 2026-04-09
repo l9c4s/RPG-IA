@@ -285,6 +285,7 @@ export default function GameSession(): React.ReactElement {
 
   const [campaign,        setCampaign]        = useState<Campaign | null>(null)
   const [character,       setCharacter]       = useState<Character | null>(null)
+  const [characterImgUrl, setCharacterImgUrl] = useState<string | null>(null)
   const [party,           setParty]           = useState<Character[]>([])
   const [sessionId,       setSessionId]       = useState<string | null>(null)
   const [messages,        setMessages]        = useState<ChatMessage[]>([])
@@ -454,6 +455,16 @@ export default function GameSession(): React.ReactElement {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, gmTyping])
 
+  // Fetch character portrait when active character changes
+  useEffect(() => {
+    if (!character?.id) { setCharacterImgUrl(null); return }
+    let cancelled = false
+    api.get<{ image_url: string }>(`/images/character/${character.id}`)
+      .then((res) => { if (!cancelled) setCharacterImgUrl(res.image_url) })
+      .catch(() => { if (!cancelled) setCharacterImgUrl(null) })
+    return () => { cancelled = true }
+  }, [character?.id])
+
   // ── Send action ───────────────────────────────────────────────────────────
   const sendAction = useCallback(async (text: string) => {
     if (!text.trim() || isSending || !sessionId) return
@@ -584,23 +595,33 @@ export default function GameSession(): React.ReactElement {
           {party.length === 0 ? (
             <p className="text-slate-400 text-xs">Nenhum membro disponível ainda.</p>
           ) : (
-            party.slice(0, 5).map((member) => (
-              <div
-                key={member.id}
-                className={`char-card ${member.id === character?.id ? 'active' : ''}`}
-                onClick={() => setCharacter(member)}
-              >
-                <div className="char-header">
-                  <div className="char-avatar">{member.name?.slice(0, 2).toUpperCase()}</div>
-                  <div>
-                    <div className="char-name">{member.name}</div>
-                    <div className="char-meta">
-                      {member.race ?? 'Unknown'} {member.character_class ?? ''} · Lv {member.level ?? 1}
+            party.slice(0, 5).map((member) => {
+              const isOwner = member.owner_id === String(user?.id)
+              return (
+                <div
+                  key={member.id}
+                  className={`char-card ${member.id === character?.id ? 'active' : ''}`}
+                  onClick={() => setCharacter(member)}
+                >
+                  <div className="char-header">
+                    <div className="char-avatar">{member.name?.slice(0, 2).toUpperCase()}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div className="char-name" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        {member.name}
+                        {isOwner && (
+                          <span style={{ fontSize: 9, background: '#78350f', color: '#fcd34d', borderRadius: 4, padding: '1px 5px', fontWeight: 700, letterSpacing: '0.05em', flexShrink: 0 }}>
+                            VOCÊ
+                          </span>
+                        )}
+                      </div>
+                      <div className="char-meta">
+                        {member.race ?? 'Unknown'} {member.character_class ?? ''} · Lv {member.level ?? 1}
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            ))
+              )
+            })
           )}
         </div>
 
@@ -779,14 +800,22 @@ export default function GameSession(): React.ReactElement {
 
       {/* ── Character side panels (direita) ─────────────────────── */}
       <div className="char-panels">
-        {/* Box 1 — portrait 8-bit */}
+        {/* Box 1 — portrait */}
         <div className="char-panel-img">
           <div className="text-[9px] text-slate-500 uppercase tracking-widest mb-2">
             {character?.name ?? 'Personagem'}
           </div>
-          <div className="pixel-placeholder">
-            {character?.char_type === 'ai_companion' ? '🤖' : '🧙'}
-          </div>
+          {characterImgUrl ? (
+            <img
+              src={characterImgUrl}
+              alt={character?.name ?? 'Personagem'}
+              className="w-full aspect-square object-cover rounded-lg border border-slate-700"
+            />
+          ) : (
+            <div className="pixel-placeholder">
+              {character?.char_type === 'ai_companion' ? '🤖' : '🧙'}
+            </div>
+          )}
           <div className="text-[10px] text-slate-400 mt-2 text-center leading-tight">
             {character?.race ?? '—'} {character?.character_class ?? '—'}
           </div>

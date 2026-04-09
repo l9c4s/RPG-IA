@@ -7,7 +7,7 @@ ao domínio diretamente. Os repositórios convertem ORM ↔ entidades de domíni
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -31,6 +31,8 @@ class CampaignORM(Base):
     tone: Mapped[str] = mapped_column(String(100), nullable=False, default="heroic")
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="lobby")
     locations_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Quantidade de companheiros IA configurada na criação (0 = nenhum)
+    ai_players_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     # Progresso assíncrono da abertura: "idle" | "generating" | "ready" | "failed"
     init_status: Mapped[str] = mapped_column(String(20), nullable=False, default="idle")
     opening_generated: Mapped[bool] = mapped_column(nullable=False, default=False)

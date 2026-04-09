@@ -118,7 +118,7 @@ class TriggerOpeningUseCase:
         self._campaigns = campaign_repo
         self._sessions = session_repo
 
-    async def execute(self, dto: TriggerOpeningDTO, opening_task_fn=None) -> OpeningStatusDTO:
+    async def execute(self, dto: TriggerOpeningDTO) -> OpeningStatusDTO:
         campaign = await self._campaigns.get_by_id(dto.campaign_id)
         if campaign is None:
             raise ValueError(f"Campanha {dto.campaign_id} não encontrada.")
@@ -135,11 +135,11 @@ class TriggerOpeningUseCase:
         if session is None:
             raise ValueError("Inicie a sessão antes de gerar a abertura.")
 
-        if opening_task_fn:
-            import asyncio
-            asyncio.create_task(opening_task_fn(dto.campaign_id, session.id))
-
-        return OpeningStatusDTO(init_status="generating", message="Geração iniciada.")
+        return OpeningStatusDTO(
+            init_status="generating",
+            message="Geração iniciada.",
+            session_id=session.id,
+        )
 
 
 class Generate8BitCharacterUseCase:

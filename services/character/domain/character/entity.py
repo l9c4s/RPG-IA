@@ -14,14 +14,32 @@ from domain.character.value_objects import AbilityType, CharacterType, RechargeT
 
 
 def calc_proficiency_bonus(level: int) -> int:
-    """D&D 5e proficiency bonus: 2 + (level-1)//4
-    Level 1-4  → +2
-    Level 5-8  → +3
-    Level 9-12 → +4
-    Level 13-16 → +5
-    Level 17-20 → +6
-    """
+    """D&D 5e proficiency bonus: 2 + (level-1)//4"""
     return 2 + (level - 1) // 4
+
+
+# Dado de vida máximo por classe (D&D 5e) — aceita nomes em PT e EN
+_HIT_DICE: dict[str, int] = {
+    # Português
+    "bárbaro": 12, "bardo": 8, "clérigo": 8, "druida": 8,
+    "guerreiro": 10, "monge": 8, "paladino": 10, "patrulheiro": 10,
+    "ladino": 8, "feiticeiro": 6, "bruxo": 8, "mago": 6,
+    # Inglês
+    "barbarian": 12, "bard": 8, "cleric": 8, "druid": 8,
+    "fighter": 10, "monk": 8, "paladin": 10, "ranger": 10,
+    "rogue": 8, "sorcerer": 6, "warlock": 8, "wizard": 6,
+}
+
+
+def calc_initial_hp(class_: str, constitution: int, level: int = 1) -> int:
+    """HP inicial = dado de vida máximo + MOD CON (mínimo 10)."""
+    hit_die = _HIT_DICE.get(class_.lower(), 8)  # padrão d8 se classe desconhecida
+    con_mod = (constitution - 10) // 2
+    hp = max(1, hit_die + con_mod)
+    # Níveis acima de 1: usa metade do dado + 1 por nível extra
+    for _ in range(level - 1):
+        hp += max(1, (hit_die // 2 + 1) + con_mod)
+    return max(10, hp)
 
 
 # ---------------------------------------------------------------------------

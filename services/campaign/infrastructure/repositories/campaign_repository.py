@@ -38,6 +38,7 @@ class CampaignRepository:
             status=CampaignStatus(orm.status),
             init_status=InitStatus(orm.init_status),
             opening_generated=orm.opening_generated,
+            ai_players_count=orm.ai_players_count,
             locations_json=orm.locations_json,
             created_at=orm.created_at,
             updated_at=orm.updated_at,
@@ -54,6 +55,7 @@ class CampaignRepository:
         orm.status = campaign.status.value
         orm.init_status = campaign.init_status.value
         orm.opening_generated = campaign.opening_generated
+        orm.ai_players_count = campaign.ai_players_count
         orm.locations_json = campaign.locations_json
 
     # ------------------------------------------------------------------

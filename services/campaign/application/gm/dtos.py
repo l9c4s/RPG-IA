@@ -25,6 +25,7 @@ class TriggerOpeningDTO:
 class OpeningStatusDTO:
     init_status: str
     message: str
+    session_id: UUID | None = None
 
 
 @dataclass

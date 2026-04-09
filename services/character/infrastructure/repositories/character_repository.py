@@ -220,7 +220,11 @@ class CharacterRepository:
             await self._session.flush()
 
             # Initialize status
-            status_orm = CharacterStatusDB(id=uuid4(), character_id=character.id)
+            if character.status:
+                status_orm = CharacterStatusDB(id=character.status.id, character_id=character.id)
+                self._apply_status_to_orm(character.status, status_orm)
+            else:
+                status_orm = CharacterStatusDB(id=uuid4(), character_id=character.id)
             self._session.add(status_orm)
 
             # Initialize attributes

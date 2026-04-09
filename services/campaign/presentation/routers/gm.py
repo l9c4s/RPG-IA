@@ -4,17 +4,16 @@ Rotas HTTP do Game Master — borda da aplicação.
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
 from application.gm.dtos import Generate8BitCharacterDTO, TriggerOpeningDTO
 from application.gm.use_cases import (
     Generate8BitCharacterUseCase,
-    GenerateOpeningNarrativeUseCase,
     TriggerOpeningUseCase,
 )
+from presentation.background_tasks import run_opening_background
 from presentation.dependencies import (
     get_8bit_character_uc,
-    get_opening_narrative_uc,
     get_trigger_opening_uc,
 )
 from presentation.schemas.gm import Generate8BitRequest, Generate8BitResponse, OpeningStatusResponse
@@ -43,7 +42,8 @@ async def generate_character_8bit(
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Erro ao gerar a descrição 8-bit do personagem. Tente novamente.",)
+            detail="Erro ao gerar a descrição 8-bit do personagem. Tente novamente.",
+        )
 
 
 @router.post(
@@ -52,18 +52,17 @@ async def generate_character_8bit(
 )
 async def trigger_generate_opening(
     campaign_id: UUID,
+    background_tasks: BackgroundTasks,
     trigger_uc: TriggerOpeningUseCase = Depends(get_trigger_opening_uc),
-    opening_uc: GenerateOpeningNarrativeUseCase = Depends(get_opening_narrative_uc),
 ) -> OpeningStatusResponse:
     """
     Dispara manualmente a geração da narrativa de abertura.
     Idempotente: ignora se já gerado ou em andamento.
     """
     try:
-        result = await trigger_uc.execute(
-            TriggerOpeningDTO(campaign_id=campaign_id),
-            opening_task_fn=opening_uc.execute,
-        )
+        result = await trigger_uc.execute(TriggerOpeningDTO(campaign_id=campaign_id))
+        if result.init_status == "generating" and result.session_id:
+            background_tasks.add_task(run_opening_background, campaign_id, result.session_id)
         return OpeningStatusResponse(init_status=result.init_status, message=result.message)
     except ValueError as exc:
         code = (

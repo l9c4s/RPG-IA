@@ -12,6 +12,12 @@ class ImageType(str, Enum):
     map = "map"
 
 
+class ImageStatus(str, Enum):
+    pending = "pending"
+    completed = "completed"
+    failed = "failed"
+
+
 class ImageSize(str, Enum):
     square = "1024x1024"
     wide = "1792x1024"
@@ -39,7 +45,14 @@ class Prompt:
     # ------------------------------------------------------------------
 
     @classmethod
-    def build_character(cls, description: str) -> "Prompt":
+    def build_character(cls, description: str, style: str = "pixel_art") -> "Prompt":
+        if style == "pixel_art":
+            return cls(
+                f"8-bit pixel art portrait of {description}, "
+                "retro RPG video game sprite, pixelated, solid flat colors, "
+                "no gradients, no shading, bold outlines, "
+                "neutral dark background, No text, no watermarks"
+            )
         return cls(
             f"upper body portrait of {description}, "
             "facing slightly left, neutral dark background, "
@@ -63,9 +76,45 @@ class Prompt:
         )
 
     @classmethod
-    def build_map(cls, description: str) -> "Prompt":
+    def build_map(
+        cls,
+        description: str,
+        locations: list[dict] | None = None,
+    ) -> "Prompt":
+        """Gera prompt de mapa com dicas posicionais por local.
+
+        ``locations`` é uma lista de dicts com keys:
+        ``name``, ``type``, ``x`` (0-100), ``y`` (0-100).
+        As coordenadas são convertidas em referências de quadrante para
+        guiar o DALL-E a colocar cada elemento no lugar certo.
+        """
+        location_section = ""
+        if locations:
+            hints: list[str] = []
+            for loc in locations:
+                x, y = float(loc.get("x", 50)), float(loc.get("y", 50))
+                h = "left side" if x < 33 else ("right side" if x > 66 else "center")
+                v = "top" if y < 33 else ("bottom" if y > 66 else "middle"  )
+                hints.append(
+                    f"{loc['name']} ({loc['type']}) placed in the {v} {h}"
+                )
+            location_section = (
+                "Specific locations to place on the map — follow positions carefully: "
+                + "; ".join(hints)
+                + ". "
+            )
+
         return cls(
-            f"{description}, top-down view, "
-            "hand-drawn parchment map style, aged paper texture, "
-            "fantasy cartography, No text, no watermarks"
+            f"Fantasy RPG world map — {description}. "
+            f"{location_section}"
+            "Overhead cartographic illustration, hand-drawn ink style on aged parchment paper, "
+            "sepia and earth tones with muted greens and blues. "
+            "Large continent with irregular coastlines surrounded by ocean with waves. "
+            "Multiple distinct biomes: snow-capped mountain ranges, dense forests with individual trees, "
+            "open plains and grasslands, swamps, deserts, and river deltas flowing to sea. "
+            "Scattered walled cities and villages illustrated as small detailed icons. "
+            "Winding roads and rivers connecting regions. "
+            "Decorative compass rose in one corner, ornate double-line border frame. "
+            "Isometric-style terrain icons, classic D&D cartography aesthetic, "
+            "cinematic fantasy atlas quality. No readable text, no watermarks."
         )

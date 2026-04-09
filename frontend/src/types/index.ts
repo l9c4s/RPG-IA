@@ -50,9 +50,10 @@ export interface Campaign {
   owner_id?:        string
   created_at:       string
   updated_at:       string
-  session_count?:   number
-  player_count?:    number
-  ai_players?:      Record<string, unknown>[]
+  session_count?:     number
+  player_count?:      number
+  ai_players_count?:  number
+  ai_players?:        Record<string, unknown>[]
 }
 
 export type CampaignStatusType = Campaign['status']

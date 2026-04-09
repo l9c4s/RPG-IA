@@ -38,6 +38,7 @@ def _campaign_to_response_dto(campaign: Campaign) -> CampaignResponseDTO:
         description=campaign.description,
         created_at=campaign.created_at.isoformat() if campaign.created_at else None,
         updated_at=campaign.updated_at.isoformat() if campaign.updated_at else None,
+        ai_players_count=campaign.ai_players_count,
     )
 
 
@@ -59,6 +60,7 @@ class CreateCampaignUseCase:
             difficulty=dto.difficulty,
             tone=dto.tone,
             description=dto.description,
+            ai_players_count=dto.ai_players_count,
         )
         saved = await self._repo.save(campaign)
         response = _campaign_to_response_dto(saved)
@@ -183,8 +185,6 @@ class AddAIPlayerUseCase:
         self._gm = gm_service
         self._images = image_client
 
-    MAX_AI_COMPANIONS = 4
-
     async def execute(self, dto: AddAIPlayerDTO) -> dict:
         import asyncio
 
@@ -192,12 +192,17 @@ class AddAIPlayerUseCase:
         if campaign is None:
             raise ValueError(f"Campanha {dto.campaign_id} não encontrada.")
 
-        # Valida limite de companheiros IA
+        # Valida limite baseado no que foi configurado na criação da campanha
+        if campaign.ai_players_count == 0:
+            raise LimitExceededError(
+                "Esta campanha não foi configurada para ter companheiros IA."
+            )
+
         existing = await self._characters.list_campaign_characters(str(dto.campaign_id))
         ai_count = sum(1 for c in existing if c.get("char_type") == "ai_companion")
-        if ai_count >= self.MAX_AI_COMPANIONS:
+        if ai_count >= campaign.ai_players_count:
             raise LimitExceededError(
-                f"Limite de {self.MAX_AI_COMPANIONS} companheiros IA atingido para esta campanha."
+                f"Limite de {campaign.ai_players_count} companheiro(s) IA atingido para esta campanha."
             )
 
         # Gera conceito 8-bit completo: nome, raça, classe, aparência, backstory, pixel_art_prompt
@@ -205,29 +210,32 @@ class AddAIPlayerUseCase:
             "a unique and interesting fantasy RPG adventurer companion"
         )
 
+        def _trunc(value: str | None, limit: int) -> str | None:
+            return value[:limit] if isinstance(value, str) else value
+
         character = await self._characters.create_character({
-            "name": concept.get("name"),
-            "class": concept.get("class"),
-            "race": concept.get("race"),
+            "name": _trunc(concept.get("name"), 200) or "Companion",
+            "class": _trunc(concept.get("class"), 100) or "Fighter",
+            "race": _trunc(concept.get("race"), 100) or "Human",
             "char_type": "ai_companion",
-            "backstory": concept.get("backstory"),
-            "appearance": concept.get("appearance"),
-            "alignment": concept.get("alignment"),
-            "background": concept.get("background"),
+            "backstory": _trunc(concept.get("backstory"), 4900),
+            "appearance": _trunc(concept.get("appearance"), 1900),
+            "alignment": _trunc(concept.get("alignment"), 50),
+            "background": _trunc(concept.get("background"), 200),
             "campaign_id": str(dto.campaign_id),
             "level": 1,
         })
 
-        # Gera imagem 8-bit em background (não bloqueia a resposta)
+        # Solicita geração de imagem — retorna image_id imediatamente (202 pending)
         pixel_prompt = concept.get("pixel_art_prompt")
         if pixel_prompt and self._images and character.get("id"):
-            asyncio.create_task(
-                self._images.generate_character_image(
-                    description=pixel_prompt,
-                    character_id=str(character["id"]),
-                    campaign_id=str(dto.campaign_id),
-                )
+            pending_image_id = await self._images.generate_character_image(
+                description=pixel_prompt,
+                character_id=str(character["id"]),
+                campaign_id=str(dto.campaign_id),
             )
+            if pending_image_id:
+                character["pending_image_id"] = pending_image_id
 
         return character
 

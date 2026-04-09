@@ -32,6 +32,7 @@ class CampaignResponse(BaseModel):
     description: Optional[str]
     created_at: Optional[str]
     updated_at: Optional[str]
+    ai_players_count: int = 0
     ai_players: list[dict] = Field(default_factory=list)
 
 

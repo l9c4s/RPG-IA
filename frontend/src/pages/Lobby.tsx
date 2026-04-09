@@ -6,12 +6,39 @@ import {
 } from 'lucide-react'
 import { api } from '../api/client'
 import { useAuth } from '../hooks/useAuth'
+import { useImageSSE } from '../hooks/useImageSSE'
 import { AppLayout } from '../components/layout/AppLayout'
 import { Button } from '../components/ui/Button'
 import { Badge } from '../components/ui/Badge'
 import { Spinner } from '../components/ui/Spinner'
 import CharacterCreationModal from '../components/CharacterCreationModal'
 import type { Campaign, Character } from '../types'
+
+
+async function fetchCharacterImage(characterId: string): Promise<string | null> {
+  try {
+    const res = await api.get<{ image_url: string }>(
+      `/images/character/${characterId}`
+    )
+    return res.image_url
+  } catch {
+    return null
+  }
+}
+
+// ── SSE subscriber (renders nothing, one per pending image) ──────────────────
+function ImageSSESubscriber({
+  imageId,
+  onCompleted,
+  onFailed,
+}: {
+  imageId:     string
+  onCompleted: (url: string) => void
+  onFailed:    () => void
+}): null {
+  useImageSSE(imageId, onCompleted, onFailed)
+  return null
+}
 
 type InitStatus = 'idle' | 'generating' | 'ready' | 'failed'
 
@@ -90,7 +117,24 @@ export default function Lobby(): React.ReactElement {
   const [startError,       setStartError]       = useState<string | null>(null)
   const [error,            setError]            = useState<string | null>(null)
   const [showCreateModal,  setShowCreateModal]  = useState(false)
+  // Pending SSE image subscriptions: characterId → imageId
+  const [pendingImages,    setPendingImages]    = useState<Array<{ characterId: string; imageId: string }>>([])
+  // Resolved images: characterId → imageUrl
+  const [characterImages,  setCharacterImages]  = useState<Record<string, string>>({})
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  function addPendingImage(characterId: string, imageId: string): void {
+    setPendingImages((prev) => [...prev, { characterId, imageId }])
+  }
+
+  function handleImageReady(characterId: string, imageUrl: string): void {
+    setCharacterImages((prev) => ({ ...prev, [characterId]: imageUrl }))
+    setPendingImages((prev) => prev.filter((p) => p.characterId !== characterId))
+  }
+
+  function handleImageFailed(imageId: string): void {
+    setPendingImages((prev) => prev.filter((p) => p.imageId !== imageId))
+  }
 
   const fetchData = useCallback(async () => {
     if (!campaignId) return
@@ -117,6 +161,47 @@ export default function Lobby(): React.ReactElement {
       setIsLoading(false)
     }
   }, [campaignId])
+  
+  useEffect(() => {
+  if (characters.length === 0) return
+
+  let cancelled = false
+
+  async function loadImages() {
+    const results = await Promise.all(
+      characters.map(async (char) => {
+        // evita re-fetch se já temos imagem
+        if (characterImages[char.id]) return null
+
+        const url = await fetchCharacterImage(char.id)
+        if (!url) return null
+
+        return { id: char.id, url }
+      })
+    )
+
+    if (cancelled) return
+
+    const imagesMap: Record<string, string> = {}
+
+    results.forEach((res) => {
+      if (res) imagesMap[res.id] = res.url
+    })
+
+    if (Object.keys(imagesMap).length > 0) {
+      setCharacterImages((prev) => ({
+        ...prev,
+        ...imagesMap,
+      }))
+    }
+  }
+
+  loadImages()
+
+  return () => {
+    cancelled = true
+  }
+}, [characters])
 
   useEffect(() => { void fetchData() }, [fetchData])
 
@@ -142,18 +227,29 @@ export default function Lobby(): React.ReactElement {
     return () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null } }
   }, [campaignId, session?.init_status]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const MAX_AI_COMPANIONS = 4
+  const maxAiCompanions = campaign?.ai_players_count ?? 0
   const aiCount = characters.filter((c) => c.char_type === 'ai_companion').length
 
   const handleAddAIPlayer = async () => {
     if (!campaignId) return
     setIsAddingAI(true)
     try {
-      const newChar = await api.post<Character>(`/campaigns/${campaignId}/ai-player`, {})
+      const newChar = await api.post<Character & { pending_image_id?: string }>(
+        `/campaigns/${campaignId}/ai-player`, {}
+      )
       setCharacters((prev) => [...prev, newChar])
+      if (newChar.pending_image_id) {
+        addPendingImage(newChar.id, newChar.pending_image_id)
+      }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Erro ao gerar companheiro IA. Tente novamente.'
-      setStartError(msg)
+      const status = (err as { response?: { status?: number } })?.response?.status
+      if (status === 400) {
+        // Não mostra erro — o botão já será desabilitado, recarrega personagens para sincronizar
+        const chars = await api.get<Character[]>(`/campaigns/${campaignId}/characters`)
+        setCharacters(chars)
+      } else {
+        setStartError('Erro ao gerar companheiro IA. Tente novamente.')
+      }
     } finally {
       setIsAddingAI(false)
     }
@@ -264,9 +360,18 @@ export default function Lobby(): React.ReactElement {
                       }`}
                     >
                       <div className="flex items-center gap-2.5">
-                        {isAI && (
+                        {/* Avatar: resolved image, pending spinner, or AI icon */}
+                        {characterImages[char.id] ? (
+                          <img
+                            src={characterImages[char.id]}
+                            alt={char.name}
+                            className="w-8 h-8 rounded-full object-cover shrink-0 border border-slate-600"
+                          />
+                        ) : pendingImages.some((p) => p.characterId === char.id) ? (
+                          <Spinner size="sm" />
+                        ) : isAI ? (
                           <Bot className="w-4 h-4 text-indigo-400 shrink-0" />
-                        )}
+                        ) : null}
                         <div>
                           <p className="text-slate-200 font-semibold text-sm">{char.name}</p>
                           <p className="text-slate-500 text-xs">
@@ -303,10 +408,10 @@ export default function Lobby(): React.ReactElement {
               Crie pelo menos 1 personagem para iniciar a sessão.
             </div>
           )}
-          {aiCount >= MAX_AI_COMPANIONS && (
+          {maxAiCompanions > 0 && aiCount >= maxAiCompanions && (
             <div className="flex items-center gap-2 bg-indigo-900/30 border border-indigo-700/50 rounded-lg px-4 py-3 text-indigo-300 text-sm font-serif italic">
               <Bot className="w-4 h-4 shrink-0" />
-              Limite de {MAX_AI_COMPANIONS} companheiros IA atingido.
+              Limite de {maxAiCompanions} companheiro{maxAiCompanions !== 1 ? 's' : ''} IA atingido.
             </div>
           )}
           {startError && (
@@ -367,14 +472,24 @@ export default function Lobby(): React.ReactElement {
               leftIcon={isAddingAI ? <Loader2 className="w-4 h-4 animate-spin" /> : <Bot className="w-4 h-4" />}
               onClick={() => void handleAddAIPlayer()}
               isLoading={isAddingAI}
-              disabled={isAddingAI || aiCount >= MAX_AI_COMPANIONS}
+              disabled={isAddingAI || aiCount >= maxAiCompanions}
               className="flex-1 justify-center text-indigo-400 hover:text-indigo-300 hover:border-indigo-700/50 disabled:opacity-40"
             >
-              Adicionar IA {aiCount > 0 && `(${aiCount}/${MAX_AI_COMPANIONS})`}
+              Adicionar IA {maxAiCompanions > 0 && `(${aiCount}/${maxAiCompanions})`}
             </Button>
           </div>
         </div>
       ) : null}
+
+      {/* SSE subscribers — invisible, one per pending image */}
+      {pendingImages.map(({ characterId, imageId }) => (
+        <ImageSSESubscriber
+          key={imageId}
+          imageId={imageId}
+          onCompleted={(url) => handleImageReady(characterId, url)}
+          onFailed={() => handleImageFailed(imageId)}
+        />
+      ))}
 
       {campaignId && (
         <CharacterCreationModal
@@ -385,6 +500,7 @@ export default function Lobby(): React.ReactElement {
             setCharacters((prev) => [...prev, newChar])
             setShowCreateModal(false)
           }}
+          onImagePending={addPendingImage}
         />
       )}
     </AppLayout>

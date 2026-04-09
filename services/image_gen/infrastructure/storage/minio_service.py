@@ -53,3 +53,19 @@ class MinioService:
             raise RuntimeError(f"Falha ao armazenar imagem: {exc}") from exc
 
         return f"{_MEDIA_BASE_URL}/{object_name}"
+
+    async def upload_svg(self, svg_content: str, object_name: str) -> str:
+        data = svg_content.encode("utf-8")
+        try:
+            self._client.put_object(
+                bucket_name=self._bucket,
+                object_name=object_name,
+                data=io.BytesIO(data),
+                length=len(data),
+                content_type="image/svg+xml",
+            )
+        except S3Error as exc:
+            logger.error("Erro ao fazer upload SVG no MinIO: %s", exc)
+            raise RuntimeError(f"Falha ao armazenar SVG: {exc}") from exc
+
+        return f"{_MEDIA_BASE_URL}/{object_name}"

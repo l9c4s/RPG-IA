@@ -1,6 +1,7 @@
 import React, { useState, useTransition } from 'react'
 import { Sword, Shield, User, ChevronRight, ChevronLeft, Check, Sparkles } from 'lucide-react'
 import { api } from '../api/client'
+import { useAuth } from '../hooks/useAuth'
 import { Modal } from './ui/Modal'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
@@ -97,8 +98,9 @@ function Step1({ data, onChange, onNext }: Step1Props): React.ReactElement {
   const [error, setError] = useState<string | null>(null)
 
   function handleNext(): void {
-    if (!data.name.trim()) { setError('Character name is required.'); return }
-    if (data.name.trim().length < 2) { setError('Name must be at least 2 characters.'); return }
+    if (!data.name.trim()) { setError('O nome do personagem é obrigatório.'); return }
+    if (data.name.trim().length < 2) { setError('O nome deve ter pelo menos 2 caracteres.'); return }
+    if (!data.character_class) { setError('Selecione uma classe para o personagem.'); return }
     setError(null)
     onNext()
   }
@@ -400,10 +402,11 @@ function AiPanel({ campaignId, onGenerated, onBack }: AiPanelProps): React.React
 
 // ─── Main Modal ────────────────────────────────────────────────────────────
 interface CharacterCreationModalProps {
-  isOpen:     boolean
-  onClose:    () => void
-  campaignId: string
-  onCreate:   (character: Character) => void
+  isOpen:          boolean
+  onClose:         () => void
+  campaignId:      string
+  onCreate:        (character: Character) => void
+  onImagePending?: (characterId: string, imageId: string) => void
 }
 
 const DEFAULT_BASIC: BasicInfo = {
@@ -428,7 +431,9 @@ export default function CharacterCreationModal({
   onClose,
   campaignId,
   onCreate,
+  onImagePending,
 }: CharacterCreationModalProps): React.ReactElement {
+  const { user }                       = useAuth()
   const [mode,         setMode]         = useState<WizardMode>('select')
   const [step,         setStep]         = useState<WizardStep>(1)
   const [isLoading,    setIsLoading]    = useState(false)
@@ -477,13 +482,20 @@ export default function CharacterCreationModal({
         personality.flaws && `Flaws: ${personality.flaws}`,
       ].filter(Boolean)
 
+      if (!basicInfo.character_class) {
+        setError('Selecione uma classe para o personagem antes de continuar.')
+        setIsLoading(false)
+        return
+      }
+
       const payload = {
         campaign_id: campaignId,
-        name:        basicInfo.name,
+        owner_id:    user?.id,
+        name:        basicInfo.name.trim(),
         race:        basicInfo.race,
         class:       basicInfo.character_class,   // Pydantic alias
-        background:  basicInfo.background,
-        alignment:   basicInfo.alignment,
+        background:  basicInfo.background || undefined,
+        alignment:   basicInfo.alignment || undefined,
         level:       1,
         appearance:  personality.personality_traits || undefined,
         backstory:   backstoryParts.length ? backstoryParts.join('\n') : undefined,
@@ -493,6 +505,23 @@ export default function CharacterCreationModal({
       onCreate(character)
       reset()
       onClose()
+
+      // Dispara geração de imagem e captura image_id para SSE
+      const appearance = payload.appearance || ''
+      const imageDescription = [
+        appearance,
+        `${payload.race} ${payload.class}`,
+        payload.alignment,
+      ].filter(Boolean).join(', ')
+      const characterId = character.id
+      api.post<{ image_id: string }>('/generate/character', {
+        description:   imageDescription,
+        character_id:  characterId,
+        campaign_id:   campaignId,
+        style:         'pixel_art',
+      }).then((resp) => {
+        if (resp.image_id && onImagePending) onImagePending(characterId, resp.image_id)
+      }).catch(() => { /* ignora falha silenciosamente */ })
     } catch {
       setError('Failed to create character. Please try again.')
       setIsLoading(false)

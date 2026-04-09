@@ -43,7 +43,7 @@ class StartCampaignSessionUseCase:
         self._sessions = session_repo
         self._characters = character_client
 
-    async def execute(self, dto: StartSessionDTO, opening_task_fn=None) -> SessionResponseDTO:
+    async def execute(self, dto: StartSessionDTO) -> SessionResponseDTO:
         campaign = await self._campaigns.get_by_id(dto.campaign_id)
         if campaign is None:
             raise ValueError(f"Campanha {dto.campaign_id} não encontrada.")
@@ -65,8 +65,6 @@ class StartCampaignSessionUseCase:
 
         if not campaign.opening_generated:
             campaign.start_generating_opening()
-            if opening_task_fn:
-                asyncio.create_task(opening_task_fn(dto.campaign_id, saved_session.id))
 
         await self._campaigns.save(campaign)
 
