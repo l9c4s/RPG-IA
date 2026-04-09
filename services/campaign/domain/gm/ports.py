@@ -44,6 +44,32 @@ class IGMService(Protocol):
         """Gera aleatoriamente um arquétipo de companheiro IA (name, class, race, personality, backstory)."""
         ...
 
+    async def process_round(
+        self,
+        session_id: str,
+        ordered_actions: list[dict],
+    ) -> list[str]:
+        """
+        Processa um round completo em ordem de iniciativa.
+
+        Recebe lista de dicts: [{character_name, action_text, d20_roll, initiative_order, is_pass}]
+        Retorna lista de respostas do GM (uma por ação ativa, na mesma ordem).
+        O GM pode incluir [ROLAGEM:] se decidir rolar dado para o outcome da ação.
+        Ações de passe são ignoradas (GM não narra).
+        """
+        ...
+
+    async def generate_companion_action(
+        self,
+        companion: dict,
+        scene_context: str,
+    ) -> str:
+        """
+        Gera a ação que um companheiro IA tomaria neste turno.
+        Retorna texto da ação (ex: 'Ataca o goblin com sua espada').
+        """
+        ...
+
 
 class IKnowledgeRetriever(Protocol):
     """

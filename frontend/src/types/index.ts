@@ -221,6 +221,12 @@ export type WSMessageType =
   | 'pong'
   | 'error'
   | 'gate_blocked'
+  | 'submit_action'
+  | 'round_started'
+  | 'action_submitted'
+  | 'initiative_board'
+  | 'gm_round_response'
+  | 'round_completed'
 
 export interface WSMessage {
   type:    WSMessageType

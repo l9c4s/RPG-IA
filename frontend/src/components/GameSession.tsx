@@ -17,6 +17,7 @@ import type {
   DiceRoll, StateUpdate, Campaign
 } from '../types'
 import WorldMap from './WorldMap'
+import RoundPanel, { type RoundState, type RoundPhase, type InitiativeEntry, type GMRoundResponse } from './RoundPanel'
 
 // ─── Connection indicator ──────────────────────────────────────────────────
 type ConnStatus = 'disconnected' | 'connecting' | 'connected' | 'error' | 'reconnecting'
@@ -285,6 +286,7 @@ export default function GameSession(): React.ReactElement {
 
   const [campaign,        setCampaign]        = useState<Campaign | null>(null)
   const [character,       setCharacter]       = useState<Character | null>(null)
+  const [myCharacter,     setMyCharacter]     = useState<Character | null>(null) // personagem do jogador logado — nunca muda ao clicar na sidebar
   const [characterImgUrl, setCharacterImgUrl] = useState<string | null>(null)
   const [party,           setParty]           = useState<Character[]>([])
   const [sessionId,       setSessionId]       = useState<string | null>(null)
@@ -297,6 +299,16 @@ export default function GameSession(): React.ReactElement {
   const [gateBlocked,     setGateBlocked]     = useState(false)
   const [showMap,         setShowMap]         = useState(false)
   const [gmTyping,        setGmTyping]        = useState(false)
+
+  // ── Round state ───────────────────────────────────────────────────────────
+  const DEFAULT_ROUND: RoundState = {
+    roundId: '', roundNumber: 0, phase: 'idle',
+    submittedCount: 0, expectedCount: 0,
+    myActionSubmitted: false, initiative: [], gmResponses: [],
+  }
+  const [round,        setRound]        = useState<RoundState>(DEFAULT_ROUND)
+  const [isStartingRound, setIsStartingRound] = useState(false)
+  const [useRoundMode, setUseRoundMode] = useState(true)
 
   const messagesEndRef    = useRef<HTMLDivElement>(null)
   const textareaRef       = useRef<HTMLTextAreaElement>(null)
@@ -367,6 +379,86 @@ export default function GameSession(): React.ReactElement {
         ])
         break
       }
+      // ── Round events ────────────────────────────────────────────────────
+      case 'round_started': {
+        const p = wsMsg.payload as { round_id: string; round_number: number; expected_players: number }
+        setRound({
+          roundId: p.round_id,
+          roundNumber: p.round_number,
+          phase: 'collecting',
+          submittedCount: 0,
+          expectedCount: p.expected_players,
+          myActionSubmitted: false,
+          initiative: [],
+          gmResponses: [],
+        })
+        break
+      }
+      case 'action_submitted': {
+        const p = wsMsg.payload as { character_name: string; is_pass: boolean; is_ai: boolean; action_text?: string | null }
+        setRound((prev) => ({
+          ...prev,
+          submittedCount: prev.submittedCount + 1,
+        }))
+        if (p.is_ai && p.action_text) {
+          // Companion IA: mostra a ação declarada no chat como mensagem do companion
+          setMessages((prev) => [
+            ...prev,
+            {
+              id:             crypto.randomUUID(),
+              role:           'ai_companion',
+              content:        p.action_text!,
+              timestamp:      new Date().toISOString(),
+              character_name: p.character_name,
+            } as ChatMessage,
+          ])
+        } else {
+          // Humano ou passe: mensagem de sistema discreta
+          setMessages((prev) => [
+            ...prev,
+            {
+              id:        crypto.randomUUID(),
+              role:      'system',
+              content:   `${p.is_ai ? '🤖 ' : ''}${p.character_name} ${p.is_pass ? 'passou a vez' : 'declarou sua ação'}.`,
+              timestamp: new Date().toISOString(),
+            } as ChatMessage,
+          ])
+        }
+        break
+      }
+      case 'initiative_board': {
+        const p = wsMsg.payload as { round_number: number; initiative: InitiativeEntry[] }
+        setRound((prev) => ({
+          ...prev,
+          phase: 'gm_processing',
+          initiative: p.initiative,
+        }))
+        setGmTyping(true)
+        break
+      }
+      case 'gm_round_response': {
+        const p = wsMsg.payload as GMRoundResponse
+        setRound((prev) => ({
+          ...prev,
+          gmResponses: [...prev.gmResponses, p],
+        }))
+        // Também adiciona ao chat principal
+        setMessages((prev) => [
+          ...prev,
+          {
+            id:        crypto.randomUUID(),
+            role:      'gm',
+            content:   p.gm_text,
+            timestamp: new Date().toISOString(),
+          } as ChatMessage,
+        ])
+        break
+      }
+      case 'round_completed': {
+        setGmTyping(false)
+        setRound((prev) => ({ ...prev, phase: 'completed' }))
+        break
+      }
       default:
         break
     }
@@ -425,9 +517,45 @@ export default function GameSession(): React.ReactElement {
           )
           setParty(chars)
           const myChar = chars.find((c) => c.owner_id === String(user.id)) ?? chars[0]
-          if (myChar) setCharacter(myChar)
+          if (myChar) {
+            setCharacter(myChar)
+            setMyCharacter(myChar)
+          }
         } catch {
           // No character yet — that's OK
+        }
+
+        // Restaura round ativo se existir (ex: GM está processando, ou collecting)
+        try {
+          const activeRound = await api.get<{
+            round_id: string; round_number: number; status: string
+            submitted_count: number; expected_count: number
+            actions: Array<{
+              character_name: string; is_ai: boolean; d20_roll: number
+              initiative_order: number; action_text: string | null
+              is_pass: boolean; character_id: string | null
+            }>
+          } | null>(`/rounds/active?session_id=${sessionData.id}`)
+
+          if (activeRound) {
+            const phase = activeRound.status as RoundPhase
+            setRound({
+              roundId:           activeRound.round_id,
+              roundNumber:       activeRound.round_number,
+              phase,
+              submittedCount:    activeRound.submitted_count,
+              expectedCount:     activeRound.expected_count || activeRound.submitted_count,
+              myActionSubmitted: phase !== 'collecting',
+              initiative:        phase !== 'collecting' ? activeRound.actions : [],
+              gmResponses:       [],
+            })
+            // Se GM estava processando e serviço reiniciou, re-despacha
+            if (phase === 'gm_processing') {
+              api.post(`/rounds/${activeRound.round_id}/dispatch-gm`, {}).catch(() => {})
+            }
+          }
+        } catch {
+          // Nenhum round ativo — tudo bem
         }
 
         connect(sessionData.id, user.id)
@@ -514,6 +642,91 @@ export default function GameSession(): React.ReactElement {
       void sendAction(inputText)
     }
   }
+
+  // ── Round mode handlers ───────────────────────────────────────────────────
+  const fetchAndSetActiveRound = useCallback(async (sid: string) => {
+    try {
+      const activeRound = await api.get<{
+        round_id: string; round_number: number; status: string
+        submitted_count: number; expected_count: number
+        actions: Array<{
+          character_name: string; is_ai: boolean; d20_roll: number
+          initiative_order: number; action_text: string | null
+          is_pass: boolean; character_id: string | null
+        }>
+      } | null>(`/rounds/active?session_id=${sid}`)
+
+      if (activeRound) {
+        const phase = activeRound.status as RoundPhase
+        setRound({
+          roundId:           activeRound.round_id,
+          roundNumber:       activeRound.round_number,
+          phase,
+          submittedCount:    activeRound.submitted_count,
+          expectedCount:     activeRound.expected_count || activeRound.submitted_count,
+          myActionSubmitted: phase !== 'collecting',
+          initiative:        phase !== 'collecting' ? activeRound.actions : [],
+          gmResponses:       [],
+        })
+        if (phase === 'gm_processing') {
+          api.post(`/rounds/${activeRound.round_id}/dispatch-gm`, {}).catch(() => {})
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }, [])
+
+  const startRound = useCallback(async () => {
+    if (!sessionId || !campaignId) return
+    setIsStartingRound(true)
+    try {
+      const result = await api.post<{
+        round_id: string; round_number: number; expected_count: number; status: string
+      }>('/rounds/start', { session_id: sessionId, campaign_id: campaignId })
+      setRound({
+        roundId: result.round_id,
+        roundNumber: result.round_number,
+        phase: result.status as RoundPhase,
+        submittedCount: 0,
+        expectedCount: result.expected_count,
+        myActionSubmitted: false,
+        initiative: [],
+        gmResponses: [],
+      })
+    } catch (err: unknown) {
+      // 409 = já existe round ativo → busca e exibe
+      const status = (err as { response?: { status?: number } })?.response?.status
+      if (status === 409) {
+        await fetchAndSetActiveRound(sessionId)
+      } else {
+        const msg = err instanceof Error ? err.message : 'Erro ao iniciar round.'
+        setMessages((prev) => [
+          ...prev,
+          { id: crypto.randomUUID(), role: 'system', content: msg, timestamp: new Date().toISOString() } as ChatMessage,
+        ])
+      }
+    } finally {
+      setIsStartingRound(false)
+    }
+  }, [sessionId, campaignId, fetchAndSetActiveRound])
+
+  const handleRoundAction = useCallback((actionText: string | null, isPass: boolean) => {
+    if (!sessionId || !campaignId || !myCharacter) return
+    send({
+      type: 'submit_action',
+      payload: {
+        session_id:     sessionId,
+        campaign_id:    campaignId,
+        character_id:   myCharacter.id,
+        character_name: myCharacter.name,
+        is_pass:        isPass,
+        action_text:    actionText,
+        player_id:      user?.id,
+      },
+    })
+    setRound((prev) => ({ ...prev, myActionSubmitted: true }))
+  }, [sessionId, campaignId, myCharacter, user, send])
 
   const toggleVoice = (): void => {
     setVoiceActive((current) => !current)
@@ -681,38 +894,60 @@ export default function GameSession(): React.ReactElement {
               <div ref={messagesEndRef} />
             </div>
 
-            <div className="input-area">
-              <div className="quick-actions">
-                <button type="button" className="quick-btn" onClick={() => quickAction('I attack!')}>⚔ Attack</button>
-                <button type="button" className="quick-btn" onClick={() => quickAction('I search the area carefully.')}>🔍 Search</button>
-                <button type="button" className="quick-btn" onClick={() => quickAction('I try to persuade the NPC.')}>💬 Persuade</button>
-                <button type="button" className="quick-btn" onClick={() => quickAction('I take a short rest.')}>🛌 Short Rest</button>
-                <button type="button" className="quick-btn" onClick={() => quickAction('I use stealth to hide.')}>👁 Stealth</button>
-                <button type="button" className="quick-btn" onClick={() => quickAction('OOC: What are our options here?')}>💭 OOC</button>
+            {useRoundMode ? (
+              /* ── Modo de Round Coletivo ── */
+              <RoundPanel
+                round={round}
+                characterName={myCharacter?.name ?? character?.name ?? 'Aventureiro'}
+                onSubmitAction={handleRoundAction}
+                onStartRound={() => void startRound()}
+                isStarting={isStartingRound}
+              />
+            ) : (
+              /* ── Modo de Turno Livre (legado) ── */
+              <div className="input-area">
+                <div className="quick-actions">
+                  {/* Toggle para modo round */}
+                  <button
+                    type="button"
+                    className="quick-btn"
+                    style={{ borderColor: 'var(--amber)', color: 'var(--amber)' }}
+                    onClick={() => setUseRoundMode(true)}
+                    title="Alternar para modo de round coletivo com d20"
+                  >
+                    🎲 Round
+                  </button>
+                  <button type="button" className="quick-btn" onClick={() => quickAction('I attack!')}>⚔ Attack</button>
+                  <button type="button" className="quick-btn" onClick={() => quickAction('I search the area carefully.')}>🔍 Search</button>
+                  <button type="button" className="quick-btn" onClick={() => quickAction('I try to persuade the NPC.')}>💬 Persuade</button>
+                  <button type="button" className="quick-btn" onClick={() => quickAction('I take a short rest.')}>🛌 Short Rest</button>
+                  <button type="button" className="quick-btn" onClick={() => quickAction('I use stealth to hide.')}>👁 Stealth</button>
+                  <button type="button" className="quick-btn" onClick={() => quickAction('OOC: What are our options here?')}>💭 OOC</button>
+                </div>
+                <div className="input-row">
+                  <button type="button" className={`voice-btn ${voiceActive ? 'active' : ''}`} onClick={toggleVoice}>
+                    {voiceActive ? '⏹' : '🎙'}
+                  </button>
+                  <textarea
+                    ref={textareaRef}
+                    value={inputText}
+                    onChange={(e) => setInputText(e.target.value)}
+                    onInput={(e) => {
+                      const el = e.currentTarget
+                      el.style.height = 'auto'
+                      el.style.height = `${Math.min(el.scrollHeight, 128)}px`
+                    }}
+                    onKeyDown={handleKeyDown}
+                    placeholder="What do you do? Speak or type your action..."
+                    className="input-box"
+                    rows={1}
+                  />
+                  <button type="button" className="send-btn" onClick={() => void sendAction(inputText)}>
+                    ➤
+                  </button>
+                </div>
               </div>
-              <div className="input-row">
-                <button type="button" className={`voice-btn ${voiceActive ? 'active' : ''}`} onClick={toggleVoice}>
-                  {voiceActive ? '⏹' : '🎙'}
-                </button>
-                <textarea
-                  ref={textareaRef}
-                  value={inputText}
-                  onChange={(e) => setInputText(e.target.value)}
-                  onInput={(e) => {
-                    const el = e.currentTarget
-                    el.style.height = 'auto'
-                    el.style.height = `${Math.min(el.scrollHeight, 128)}px`
-                  }}
-                  onKeyDown={handleKeyDown}
-                  placeholder="What do you do? Speak or type your action..."
-                  className="input-box"
-                  rows={1}
-                />
-                <button type="button" className="send-btn" onClick={() => void sendAction(inputText)}>
-                  ➤
-                </button>
-              </div>
-            </div>
+            )}
           </div>
         )}
 

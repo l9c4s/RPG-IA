@@ -25,6 +25,7 @@ from application.gm.use_cases import (
     GenerateOpeningNarrativeUseCase,
     TriggerOpeningUseCase,
 )
+from application.round.use_cases import StartRoundUseCase, SubmitActionUseCase
 from application.session.use_cases import (
     GetCurrentSessionUseCase,
     GetSessionMessagesUseCase,
@@ -37,6 +38,7 @@ from infrastructure.external.image_client import CharacterServiceClient, ImageCl
 from infrastructure.external.knowledge_client import KnowledgeClient
 from infrastructure.external.tts_client import TTSClient
 from infrastructure.repositories.campaign_repository import CampaignRepository
+from infrastructure.repositories.round_repository import RoundRepository
 from infrastructure.repositories.session_repository import MessageRepository, SessionRepository
 from presentation.websocket.connection_manager import manager
 
@@ -223,3 +225,39 @@ def get_8bit_character_uc(
     gm: LangchainGMService = Depends(get_gm_service),
 ) -> Generate8BitCharacterUseCase:
     return Generate8BitCharacterUseCase(campaigns, gm)
+
+
+# ------------------------------------------------------------------
+# Use cases de Round
+# ------------------------------------------------------------------
+
+def get_round_repo(db: AsyncSession = Depends(get_db)) -> RoundRepository:
+    return RoundRepository(db)
+
+
+def get_start_round_uc(
+    rounds: RoundRepository = Depends(get_round_repo),
+    sessions: SessionRepository = Depends(get_session_repo),
+    chars: CharacterServiceClient = Depends(get_character_client),
+    gm: LangchainGMService = Depends(get_gm_service),
+) -> StartRoundUseCase:
+    return StartRoundUseCase(
+        round_repo=rounds,
+        session_repo=sessions,
+        character_client=chars,
+        gm_service=gm,
+        ws_broadcast_fn=manager.broadcast,
+    )
+
+
+def get_submit_action_uc(
+    rounds: RoundRepository = Depends(get_round_repo),
+    sessions: SessionRepository = Depends(get_session_repo),
+    chars: CharacterServiceClient = Depends(get_character_client),
+) -> SubmitActionUseCase:
+    return SubmitActionUseCase(
+        round_repo=rounds,
+        session_repo=sessions,
+        character_client=chars,
+        ws_broadcast_fn=manager.broadcast,
+    )

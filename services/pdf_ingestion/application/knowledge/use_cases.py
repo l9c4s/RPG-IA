@@ -8,11 +8,9 @@ from domain.knowledge.repository import (
     IAsyncEmbeddingPort,
     IAsyncKnowledgeChunkRepository,
     IKnowledgeChunkRepository,
-    IPdfSourceRepository as _ISync,
     ISyncEmbeddingPort,
     IPdfStoragePort,
 )
-from domain.pdf_source.repository import IPdfSourceRepository
 
 from .dtos import ChunkResultDTO, ProcessingResultDTO
 

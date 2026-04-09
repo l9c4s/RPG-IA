@@ -83,12 +83,14 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
-    restart: unless-stopped
+    restart: always
 
   celery_worker:
     build: ./services/pdf_ingestion
-    command: celery -A infrastructure.worker.celery_app worker --loglevel=info -Q pdf_processing
+    command: celery -A infrastructure.worker.celery_app worker --loglevel=info -Q pdf_processing -E
     env_file: .env
+    environment:
+      PYTHONPATH: /app
     volumes:
       - ./services/pdf_ingestion:/app
     depends_on:
@@ -98,12 +100,14 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
-    restart: unless-stopped
+    restart: always
 
   celery_flower:
     build: ./services/pdf_ingestion
     command: celery -A infrastructure.worker.celery_app flower --port=5555
     env_file: .env
+    environment:
+      PYTHONPATH: /app
     volumes:
       - ./services/pdf_ingestion:/app
     ports:
@@ -163,7 +167,7 @@ services:
       - "8005:8005"
     depends_on:
       - redis
-    restart: unless-stopped
+    restart: always
 
   frontend:
     build: ./frontend

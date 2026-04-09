@@ -239,6 +239,81 @@ class LangchainGMService:
         result = await asyncio.to_thread(chain.invoke, {"seed": seed})
         return result
 
+    async def process_round(
+        self,
+        session_id: str,
+        ordered_actions: list[dict],
+    ) -> list[str]:
+        """
+        Processa um round completo em ordem de iniciativa.
+        Recebe lista de ações ordenadas por d20 e retorna uma resposta do GM por ação ativa.
+        O GM pode incluir [ROLAGEM:] se decidir rolar dado para determinar o outcome.
+        """
+        # Monta bloco de ações para o prompt
+        actions_block = "\n".join(
+            f"[{a['initiative_order']}] {a['character_name']} (d20={a['d20_roll']}): {a['action_text']}"
+            for a in ordered_actions
+        )
+
+        prompt = (
+            "Você é o Mestre de um RPG de mesa. Um novo turno acaba de acontecer.\n"
+            "As ações abaixo foram declaradas pelos jogadores e ordenadas pela rolagem de d20 "
+            "(maior = age primeiro):\n\n"
+            f"{actions_block}\n\n"
+            "Para CADA ação, escreva um parágrafo narrando o resultado. "
+            "Seja criativo, dramático e justo.\n"
+            "Se o resultado de uma ação depende de sorte ou habilidade, use a tag "
+            "[ROLAGEM:tipo:1d20+mod] e o sistema rolará automaticamente.\n"
+            "Se a ação é claramente bem-sucedida ou malsucedida, narre diretamente sem rolar.\n"
+            "Separe cada resposta com '---' numa linha sozinha.\n"
+            "Responda APENAS as narrações, uma por ação, na mesma ordem."
+        )
+
+        result = await asyncio.to_thread(self._llm.invoke, prompt)
+        raw = str(result.content).strip()
+
+        # Divide respostas pelo separador '---'
+        parts = [p.strip() for p in raw.split("---") if p.strip()]
+
+        # Garante que temos uma resposta por ação (padding se necessário)
+        while len(parts) < len(ordered_actions):
+            parts.append("O Mestre observa a cena em silêncio.")
+
+        return parts[:len(ordered_actions)]
+
+    async def generate_companion_action(
+        self,
+        companion: dict,
+        scene_context: str,
+    ) -> str:
+        """
+        Gera a ação que um companheiro IA tomaria neste turno.
+        Retorna texto da ação (ex: 'Ataco o goblin com minha espada longa').
+        """
+        personality = (
+            companion.get("personality_traits")
+            or companion.get("backstory")
+            or "Um aventureiro decidido e leal."
+        )
+        appearance = companion.get("appearance", "")
+
+        prompt = (
+            f"Você é {companion.get('name', 'um companheiro')}, "
+            f"um {companion.get('character_class', 'aventureiro')} {companion.get('race', '')}.\n"
+            f"Personalidade: {personality}\n"
+            f"Aparência: {appearance}\n\n"
+            f"Contexto atual: {scene_context}\n\n"
+            "Declare em UMA frase curta e direta o que seu personagem faz neste turno. "
+            "Use a primeira pessoa. Seja coerente com sua personalidade e classe. "
+            "Exemplos: 'Ataco o inimigo mais próximo com minha espada.' / "
+            "'Lanço Bola de Fogo no grupo de goblins.' / "
+            "'Curo o aliado ferido com Curar Ferimentos.'\n"
+            "Responda APENAS a declaração de ação, sem explicações."
+        )
+
+        result = await asyncio.to_thread(self._llm.invoke, prompt)
+        return str(result.content).strip()
+
     async def generate_character_8bit(self, description: str) -> dict:
         """Gera conceito de personagem 8-bit a partir de uma descrição."""
         prompt = (
