@@ -3,6 +3,18 @@ import userEvent from '@testing-library/user-event'
 import { vi, describe, it, expect, beforeEach } from 'vitest'
 import CharacterCreationModal from '../components/CharacterCreationModal'
 
+// ── Mock useAuth (component only needs user?.id) ──────────────────────────
+vi.mock('../hooks/useAuth', () => ({
+  useAuth: vi.fn(() => ({
+    user: { id: 'test-user-id', username: 'testuser' },
+    isAuthenticated: true,
+    login: vi.fn(),
+    logout: vi.fn(),
+    register: vi.fn(),
+    clearError: vi.fn(),
+  })),
+}))
+
 // ── Mock api client ────────────────────────────────────────────────────────
 vi.mock('../api/client', () => ({
   api: {
@@ -147,7 +159,7 @@ describe('CharacterCreationModal', () => {
     const nextBtn = await waitForBtnWithText('Next: Attributes')
     fireEvent.click(nextBtn)
 
-    expect(await screen.findByText('Character name is required.')).toBeInTheDocument()
+    expect(await screen.findByText('O nome do personagem é obrigatório.')).toBeInTheDocument()
   })
 
   it('submits character creation from step 3', async () => {

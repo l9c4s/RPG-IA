@@ -254,10 +254,12 @@ def get_submit_action_uc(
     rounds: RoundRepository = Depends(get_round_repo),
     sessions: SessionRepository = Depends(get_session_repo),
     chars: CharacterServiceClient = Depends(get_character_client),
+    messages: MessageRepository = Depends(get_message_repo),
 ) -> SubmitActionUseCase:
     return SubmitActionUseCase(
         round_repo=rounds,
         session_repo=sessions,
         character_client=chars,
+        message_repo=messages,
         ws_broadcast_fn=manager.broadcast,
     )

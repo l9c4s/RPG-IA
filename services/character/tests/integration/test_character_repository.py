@@ -199,6 +199,113 @@ class TestInventory:
         found = await repo.get_inventory_item(saved.id, added.id)
         assert found is None
 
+    # ── Novos campos: stat_bonuses, special_effects, rarity, is_starting_item ──
+
+    async def test_item_with_stat_bonuses_persisted(self, db_session, sample_character):
+        repo = CharacterRepository(db_session)
+        saved = await repo.save(sample_character)
+
+        item = InventoryItem.create(
+            saved.id,
+            "Mace of Power",
+            item_type="weapon",
+            stat_bonuses={"attack_bonus": 1, "strength": 2},
+        )
+        added = await repo.add_inventory_item(item)
+
+        assert added.stat_bonuses == {"attack_bonus": 1, "strength": 2}
+
+    async def test_item_with_special_effects_persisted(self, db_session, sample_character):
+        repo = CharacterRepository(db_session)
+        saved = await repo.save(sample_character)
+
+        fx = [{"trigger": "on_hit", "effect": "1d6 fire damage"}]
+        item = InventoryItem.create(
+            saved.id,
+            "Flaming Sword",
+            item_type="weapon",
+            special_effects=fx,
+        )
+        added = await repo.add_inventory_item(item)
+
+        assert added.special_effects == fx
+
+    async def test_item_rarity_persisted(self, db_session, sample_character):
+        repo = CharacterRepository(db_session)
+        saved = await repo.save(sample_character)
+
+        item = InventoryItem.create(
+            saved.id, "Rare Ring", item_type="misc", rarity="rare"
+        )
+        added = await repo.add_inventory_item(item)
+
+        assert added.rarity == "rare"
+
+    async def test_starting_item_flag_persisted(self, db_session, sample_character):
+        repo = CharacterRepository(db_session)
+        saved = await repo.save(sample_character)
+
+        item = InventoryItem.create(
+            saved.id, "Starting Sword", item_type="weapon", is_starting_item=True
+        )
+        added = await repo.add_inventory_item(item)
+
+        assert added.is_starting_item is True
+
+    async def test_description_persisted(self, db_session, sample_character):
+        repo = CharacterRepository(db_session)
+        saved = await repo.save(sample_character)
+
+        desc = "Uma espada forjada pelos anões."
+        item = InventoryItem.create(
+            saved.id, "Dwarven Sword", item_type="weapon", description=desc
+        )
+        added = await repo.add_inventory_item(item)
+
+        assert added.description == desc
+
+    async def test_item_defaults_for_new_fields(self, db_session, sample_character):
+        """Item criado sem novos campos deve ter valores padrão corretos."""
+        repo = CharacterRepository(db_session)
+        saved = await repo.save(sample_character)
+
+        item = InventoryItem.create(saved.id, "Old Sword")
+        added = await repo.add_inventory_item(item)
+
+        assert added.stat_bonuses == {}
+        assert added.special_effects == []
+        assert added.rarity == "common"
+        assert added.is_starting_item is False
+        assert added.description is None
+
+    async def test_full_starting_item_round_trip(self, db_session, sample_character):
+        """Item com todos os novos campos — round-trip completo DB."""
+        repo = CharacterRepository(db_session)
+        saved = await repo.save(sample_character)
+
+        item = InventoryItem.create(
+            saved.id,
+            "Arco Élfico de Aço",
+            item_type="weapon",
+            quantity=1,
+            weight=1.5,
+            value_gp=25.0,
+            equipped=True,
+            stat_bonuses={"attack_bonus": 1},
+            special_effects=[{"trigger": "on_critical", "effect": "+1d6"}],
+            rarity="common",
+            is_starting_item=True,
+            description="Um arco leve adornado com runas élficas.",
+        )
+        added = await repo.add_inventory_item(item)
+
+        found = await repo.get_inventory_item(saved.id, added.id)
+        assert found is not None
+        assert found.item_name == "Arco Élfico de Aço"
+        assert found.stat_bonuses["attack_bonus"] == 1
+        assert found.is_starting_item is True
+        assert "runas" in found.description
+
 
 # ---------------------------------------------------------------------------
 # Abilities
@@ -214,7 +321,7 @@ class TestAbilities:
         added = await repo.add_ability(ability)
 
         assert added.ability_name == "Second Wind"
-        assert added.uses_remaining == 1
+        assert added.uses_current == 1
 
     async def test_add_spell(self, db_session, sample_character):
         repo = CharacterRepository(db_session)

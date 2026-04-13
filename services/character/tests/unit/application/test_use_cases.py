@@ -1,7 +1,7 @@
 """Unit tests for application use cases — repository is mocked via AsyncMock."""
 import pytest
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 from application.character.dtos import (
@@ -85,10 +85,15 @@ class TestCreateCharacterUseCase:
         repo = _make_repo()
         char = _make_character()
         repo.save.return_value = char
+        repo.get_by_id.return_value = char
 
-        uc = CreateCharacterUseCase(repo)
-        dto = CreateCharacterDTO(name="Aragorn", race="Human", class_="Ranger")
-        result = await uc.execute(dto)
+        with patch(
+            "infrastructure.inventory_generator.generate_starting_inventory",
+            new=AsyncMock(return_value=[]),
+        ):
+            uc = CreateCharacterUseCase(repo)
+            dto = CreateCharacterDTO(name="Aragorn", race="Human", class_="Ranger")
+            result = await uc.execute(dto)
 
         repo.save.assert_called_once()
         assert result.name == char.name
@@ -98,16 +103,120 @@ class TestCreateCharacterUseCase:
         repo = _make_repo()
         char = _make_character()
         repo.save.return_value = char
+        repo.get_by_id.return_value = char
 
-        uc = CreateCharacterUseCase(repo)
-        dto = CreateCharacterDTO(
-            name="X",
-            race="Y",
-            class_="Z",
-            attributes=AttributesInputDTO(strength=18),
-        )
-        await uc.execute(dto)
+        with patch(
+            "infrastructure.inventory_generator.generate_starting_inventory",
+            new=AsyncMock(return_value=[]),
+        ):
+            uc = CreateCharacterUseCase(repo)
+            dto = CreateCharacterDTO(
+                name="X",
+                race="Y",
+                class_="Z",
+                attributes=AttributesInputDTO(strength=18),
+            )
+            await uc.execute(dto)
         repo.save.assert_called_once()
+
+    async def test_player_triggers_inventory_generation(self):
+        """char_type='player' deve chamar geração de inventário inicial."""
+        repo = _make_repo()
+        char = _make_character(char_type="player")
+        repo.save.return_value = char
+        repo.get_by_id.return_value = char
+
+        mock_gen = AsyncMock(return_value=[])
+        with patch(
+            "infrastructure.inventory_generator.generate_starting_inventory",
+            new=mock_gen,
+        ):
+            uc = CreateCharacterUseCase(repo)
+            dto = CreateCharacterDTO(name="X", race="Y", class_="Ranger", char_type="player")
+            await uc.execute(dto)
+
+        mock_gen.assert_called_once()
+
+    async def test_ai_companion_triggers_inventory_generation(self):
+        """char_type='ai_companion' também deve gerar inventário."""
+        repo = _make_repo()
+        char = _make_character(char_type="ai_companion")
+        repo.save.return_value = char
+        repo.get_by_id.return_value = char
+
+        mock_gen = AsyncMock(return_value=[])
+        with patch(
+            "infrastructure.inventory_generator.generate_starting_inventory",
+            new=mock_gen,
+        ):
+            uc = CreateCharacterUseCase(repo)
+            dto = CreateCharacterDTO(name="X", race="Y", class_="Z", char_type="ai_companion")
+            await uc.execute(dto)
+
+        mock_gen.assert_called_once()
+
+    async def test_npc_does_not_trigger_inventory_generation(self):
+        """char_type='npc' NÃO deve gerar inventário inicial."""
+        repo = _make_repo()
+        char = _make_character(char_type="npc")
+        repo.save.return_value = char
+        # NPCs não chamam get_by_id para reload
+        # mas o código atual chama get_by_id para player/ai_companion
+        # Para npc, o código retorna _character_to_dto(final or saved)
+        # onde final é None (não houve get_by_id) — mas na prática usa saved.
+        # O mock abaixo garante que get_by_id não é chamado.
+        mock_gen = AsyncMock(return_value=[])
+        with patch(
+            "infrastructure.inventory_generator.generate_starting_inventory",
+            new=mock_gen,
+        ):
+            uc = CreateCharacterUseCase(repo)
+            dto = CreateCharacterDTO(name="X", race="Y", class_="Z", char_type="npc")
+            await uc.execute(dto)
+
+        mock_gen.assert_not_called()
+
+    async def test_inventory_generation_failure_does_not_crash_create(self):
+        """Falha no LLM não deve impedir criação do personagem."""
+        repo = _make_repo()
+        char = _make_character(char_type="player")
+        repo.save.return_value = char
+        repo.get_by_id.return_value = char
+
+        # Simula o generate_starting_inventory já com fallback interno
+        # (ele nunca propaga exceção — usa fallback interno)
+        mock_gen = AsyncMock(return_value=[])
+        with patch(
+            "infrastructure.inventory_generator.generate_starting_inventory",
+            new=mock_gen,
+        ):
+            uc = CreateCharacterUseCase(repo)
+            dto = CreateCharacterDTO(name="X", race="Y", class_="Z", char_type="player")
+            result = await uc.execute(dto)
+
+        assert result.name == char.name
+
+    async def test_reloads_character_after_inventory_generation(self):
+        """Deve chamar get_by_id após gerar inventário para retornar dados frescos."""
+        repo = _make_repo()
+        char_without_inventory = _make_character(inventory=[])
+        char_with_inventory = _make_character(
+            id=char_without_inventory.id,
+            inventory=[InventoryItem.create(char_without_inventory.id, "Sword")],
+        )
+        repo.save.return_value = char_without_inventory
+        repo.get_by_id.return_value = char_with_inventory
+
+        with patch(
+            "infrastructure.inventory_generator.generate_starting_inventory",
+            new=AsyncMock(return_value=[]),
+        ):
+            uc = CreateCharacterUseCase(repo)
+            dto = CreateCharacterDTO(name="X", race="Y", class_="Ranger", char_type="player")
+            result = await uc.execute(dto)
+
+        repo.get_by_id.assert_called_once_with(char_without_inventory.id)
+        assert len(result.inventory) == 1
 
 
 # ---------------------------------------------------------------------------

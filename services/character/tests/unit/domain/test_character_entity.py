@@ -204,6 +204,75 @@ class TestInventoryItem:
         assert item.properties["ac_bonus"] == 2
         assert item.equipped is True
 
+    # ── Novos campos (Sprint 1: inventário inicial com stats) ──────────────────
+
+    def test_create_defaults_new_fields(self):
+        """Campos novos têm defaults corretos quando omitidos."""
+        char_id = uuid4()
+        item = InventoryItem.create(char_id, "Longsword")
+        assert item.stat_bonuses == {}
+        assert item.special_effects == []
+        assert item.rarity == "common"
+        assert item.is_starting_item is False
+        assert item.description is None
+
+    def test_create_with_stat_bonuses(self):
+        char_id = uuid4()
+        bonuses = {"strength": 2, "armor_class": 1}
+        item = InventoryItem.create(
+            char_id, "Mace of Power", stat_bonuses=bonuses
+        )
+        assert item.stat_bonuses == bonuses
+
+    def test_create_with_special_effects(self):
+        char_id = uuid4()
+        fx = [{"trigger": "on_hit", "effect": "1d6 fire damage"}]
+        item = InventoryItem.create(
+            char_id, "Flaming Sword", special_effects=fx
+        )
+        assert item.special_effects == fx
+
+    def test_create_with_rarity(self):
+        char_id = uuid4()
+        item = InventoryItem.create(char_id, "Rare Ring", rarity="rare")
+        assert item.rarity == "rare"
+
+    def test_create_as_starting_item(self):
+        char_id = uuid4()
+        item = InventoryItem.create(
+            char_id, "Starting Sword", is_starting_item=True
+        )
+        assert item.is_starting_item is True
+
+    def test_create_with_description(self):
+        char_id = uuid4()
+        desc = "Uma espada forjada pelos anões da Montanha Solitária."
+        item = InventoryItem.create(char_id, "Dwarven Sword", description=desc)
+        assert item.description == desc
+
+    def test_create_full_starting_item(self):
+        """Simula um item gerado pelo LLM para o inventário inicial."""
+        char_id = uuid4()
+        item = InventoryItem.create(
+            char_id,
+            "Arco Élfico de Aço",
+            item_type="weapon",
+            quantity=1,
+            weight=1.5,
+            value_gp=25.0,
+            equipped=True,
+            stat_bonuses={"attack_bonus": 1},
+            special_effects=[{"trigger": "on_critical", "effect": "+1d6 piercing"}],
+            rarity="common",
+            is_starting_item=True,
+            description="Um arco leve adornado com runas élficas.",
+        )
+        assert item.item_name == "Arco Élfico de Aço"
+        assert item.stat_bonuses["attack_bonus"] == 1
+        assert item.is_starting_item is True
+        assert item.rarity == "common"
+        assert "runas" in item.description
+
 
 # ---------------------------------------------------------------------------
 # Ability
@@ -216,13 +285,13 @@ class TestAbility:
         ability = Ability.create(char_id, "Second Wind")
         assert ability.ability_name == "Second Wind"
         assert ability.ability_type == AbilityType.FEATURE
-        assert ability.uses_remaining is None
+        assert ability.uses_current is None
 
     def test_create_with_uses_initializes_remaining(self):
         char_id = uuid4()
         ability = Ability.create(char_id, "Action Surge", uses_max=1)
         assert ability.uses_max == 1
-        assert ability.uses_remaining == 1
+        assert ability.uses_current == 1
 
     def test_spell_without_level_raises(self):
         char_id = uuid4()

@@ -68,6 +68,11 @@ class StartCampaignSessionUseCase:
 
         await self._campaigns.save(campaign)
 
+        # Registra todos os personagens como campaign_players
+        asyncio.create_task(
+            self._register_players(dto.campaign_id, characters)
+        )
+
         return SessionResponseDTO(
             id=str(saved_session.id),
             campaign_id=str(saved_session.campaign_id),
@@ -75,6 +80,27 @@ class StartCampaignSessionUseCase:
             init_status=campaign.init_status.value,
             has_opening=campaign.opening_generated,
         )
+
+    async def _register_players(self, campaign_id: UUID, characters: list[dict]) -> None:
+        """Registra personagens como campaign_players em background."""
+        from infrastructure.database.connection import AsyncSessionLocal
+        from infrastructure.repositories.campaign_repository import CampaignRepository
+        try:
+            async with AsyncSessionLocal() as db:
+                repo = CampaignRepository(db)
+                for char in characters:
+                    char_id = char.get("id")
+                    if not char_id:
+                        continue
+                    await repo.register_player(
+                        campaign_id=campaign_id,
+                        character_id=UUID(str(char_id)),
+                        is_ai=char.get("char_type") == "ai_companion",
+                        ai_personality=char.get("personality_traits"),
+                    )
+                await db.commit()
+        except Exception as exc:
+            logger.warning("Falha ao registrar campaign_players: %s", exc)
 
 
 class GetCurrentSessionUseCase:

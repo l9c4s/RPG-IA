@@ -280,3 +280,98 @@ class TestRoundRepository:
 
         fetched = await repo.get_by_id(r.id)
         assert fetched.status == RoundStatus.RESOLVING
+
+
+class TestDiceRollRepository:
+    @pytest.mark.asyncio
+    async def test_save_dice_roll_persists_record(self, db_session):
+        _, session_id = await create_campaign_and_session(db_session)
+        repo = RoundRepository(db_session)
+
+        await repo.save_dice_roll(
+            session_id=session_id,
+            character_id=None,
+            roll_type="initiative",
+            dice_expr="1d20",
+            result=15,
+            breakdown={"tier": "SUCESSO NORMAL"},
+        )
+        await db_session.commit()
+
+        from sqlalchemy import text
+        row = (await db_session.execute(
+            text("SELECT roll_type, dice_expr, result FROM dice_rolls WHERE session_id = :sid"),
+            {"sid": str(session_id)},
+        )).fetchone()
+        assert row is not None
+        assert row.roll_type == "initiative"
+        assert row.dice_expr == "1d20"
+        assert row.result == 15
+
+    @pytest.mark.asyncio
+    async def test_save_dice_roll_without_character_id(self, db_session):
+        _, session_id = await create_campaign_and_session(db_session)
+        repo = RoundRepository(db_session)
+
+        await repo.save_dice_roll(
+            session_id=session_id,
+            character_id=None,
+            roll_type="action",
+            dice_expr="1d8+3",
+            result=7,
+        )
+        await db_session.commit()
+
+        from sqlalchemy import text
+        row = (await db_session.execute(
+            text("SELECT character_id FROM dice_rolls WHERE session_id = :sid"),
+            {"sid": str(session_id)},
+        )).fetchone()
+        assert row.character_id is None
+
+    @pytest.mark.asyncio
+    async def test_save_dice_roll_with_breakdown(self, db_session):
+        _, session_id = await create_campaign_and_session(db_session)
+        repo = RoundRepository(db_session)
+
+        breakdown = {"tier": "FALHA CRÍTICA", "note": "fumble"}
+        await repo.save_dice_roll(
+            session_id=session_id,
+            character_id=None,
+            roll_type="initiative",
+            dice_expr="1d20",
+            result=2,
+            breakdown=breakdown,
+        )
+        await db_session.commit()
+
+        from sqlalchemy import text
+        row = (await db_session.execute(
+            text("SELECT breakdown FROM dice_rolls WHERE session_id = :sid"),
+            {"sid": str(session_id)},
+        )).fetchone()
+        assert row.breakdown["tier"] == "FALHA CRÍTICA"
+        assert row.breakdown["note"] == "fumble"
+
+    @pytest.mark.asyncio
+    async def test_save_multiple_rolls_for_same_session(self, db_session):
+        _, session_id = await create_campaign_and_session(db_session)
+        repo = RoundRepository(db_session)
+
+        for result in (18, 7, 3):
+            await repo.save_dice_roll(
+                session_id=session_id,
+                character_id=None,
+                roll_type="initiative",
+                dice_expr="1d20",
+                result=result,
+            )
+        await db_session.commit()
+
+        from sqlalchemy import text
+        rows = (await db_session.execute(
+            text("SELECT result FROM dice_rolls WHERE session_id = :sid ORDER BY result DESC"),
+            {"sid": str(session_id)},
+        )).fetchall()
+        assert len(rows) == 3
+        assert [r.result for r in rows] == [18, 7, 3]

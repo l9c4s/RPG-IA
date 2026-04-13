@@ -227,6 +227,9 @@ export type WSMessageType =
   | 'initiative_board'
   | 'gm_round_response'
   | 'round_completed'
+  | 'session_state_changed'
+  | 'enemy_killed'
+  | 'combat_ended'
 
 export interface WSMessage {
   type:    WSMessageType

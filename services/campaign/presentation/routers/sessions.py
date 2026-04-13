@@ -5,6 +5,8 @@ Rotas HTTP de Sessão — borda da aplicação.
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from application.session.dtos import PlayerActionDTO, StartSessionDTO
 from application.session.use_cases import (
@@ -13,6 +15,9 @@ from application.session.use_cases import (
     ProcessPlayerTurnUseCase,
     StartCampaignSessionUseCase,
 )
+from infrastructure.database.connection import get_db
+from infrastructure.database.orm_models import CampaignStateORM, SessionORM
+from infrastructure.repositories.combat_repository import CombatRepository
 from presentation.background_tasks import run_opening_background
 from presentation.dependencies import (
     get_current_session_uc,
@@ -108,6 +113,64 @@ async def get_current_session(
         return SessionResponse(**vars(result))
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+
+
+@router.get("/sessions/{session_id}/state", status_code=status.HTTP_200_OK)
+async def get_session_state(
+    session_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    Retorna o estado atual da sessão: modo (exploration/combat), inimigos vivos
+    e cena atual. Chamado pelo frontend sempre que recebe 'session_state_changed'.
+    """
+    combat_repo = CombatRepository(db)
+
+    # Estado de combate
+    in_combat = False
+    enemies: list[dict] = []
+    try:
+        encounter = await combat_repo.get_active_encounter(session_id)
+        if encounter:
+            alive = await combat_repo.get_alive_enemies(encounter.id)
+            if alive:
+                in_combat = True
+                enemies = [
+                    {
+                        "name": e.display_name,
+                        "slug": e.slug,
+                        "hp_current": e.hp_current,
+                        "hp_max": e.hp_max,
+                    }
+                    for e in alive
+                ]
+    except Exception:
+        pass
+
+    # Cena atual — via campaign_state da sessão
+    current_scene: str | None = None
+    try:
+        session_row = await db.get(SessionORM, session_id)
+        if session_row:
+            result = await db.execute(
+                select(CampaignStateORM).where(
+                    CampaignStateORM.campaign_id == session_row.campaign_id
+                )
+            )
+            state_orm = result.scalar_one_or_none()
+            if state_orm:
+                current_scene = state_orm.current_scene
+    except Exception:
+        pass
+
+    return {
+        "session_mode": "combat" if in_combat else "exploration",
+        "combat": {
+            "in_combat": in_combat,
+            "enemies": enemies,
+        },
+        "current_scene": current_scene,
+    }
 
 
 @router.get("/sessions/{session_id}/messages", status_code=status.HTTP_200_OK)

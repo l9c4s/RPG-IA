@@ -4,9 +4,13 @@ Implementação concreta de IGMService usando LangChain + GPT-4o.
 
 import asyncio
 import json
+import logging
 import os
+from typing import Any, List
 
+from langchain_core.callbacks.manager import CallbackManagerForRetrieverRun
 from langchain_core.chat_history import InMemoryChatMessageHistory
+from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import (
     ChatPromptTemplate,
@@ -17,10 +21,11 @@ from langchain_core.prompts import (
 from langchain_core.retrievers import BaseRetriever
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.runnables.history import RunnableWithMessageHistory
-from langchain_community.vectorstores import PGVector
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
 from infrastructure.ai.prompts import GM_SYSTEM_PROMPT
+
+logger = logging.getLogger(__name__)
 
 # Store em memória do histórico de chat, chaveado por session_id
 _session_store: dict[str, InMemoryChatMessageHistory] = {}
@@ -32,18 +37,70 @@ def _get_session_history(session_id: str) -> InMemoryChatMessageHistory:
     return _session_store[session_id]
 
 
+class KnowledgeChunksRetriever(BaseRetriever):
+    """
+    Retriever que consulta a tabela `knowledge_chunks` diretamente via pgvector.
+    Substitui o PGVector do LangChain que usava tabelas internas (langchain_pg_embedding)
+    em vez da tabela customizada onde o pdf_ingestion salva os embeddings.
+    """
+
+    connection_string: str
+    top_k: int = 8
+
+    def _get_relevant_documents(
+        self,
+        query: str,
+        *,
+        run_manager: CallbackManagerForRetrieverRun | None = None,
+    ) -> List[Document]:
+        from sqlalchemy import create_engine, text
+
+        embeddings = OpenAIEmbeddings(
+            model="text-embedding-3-small",
+            api_key=os.getenv("OPENAI_API_KEY"),
+        )
+        try:
+            query_vector = embeddings.embed_query(query)
+            vec_str = "[" + ",".join(str(x) for x in query_vector) + "]"
+
+            engine = create_engine(self.connection_string)
+            try:
+                with engine.connect() as conn:
+                    rows = conn.execute(
+                        text("""
+                            SELECT content, rpg_system
+                            FROM knowledge_chunks
+                            WHERE embedding IS NOT NULL
+                            ORDER BY embedding <=> :vec::vector
+                            LIMIT :k
+                        """),
+                        {"vec": vec_str, "k": self.top_k},
+                    ).fetchall()
+                return [
+                    Document(
+                        page_content=row[0],
+                        metadata={"rpg_system": row[1] or "unknown"},
+                    )
+                    for row in rows
+                ]
+            finally:
+                engine.dispose()
+        except Exception as exc:
+            logger.warning("KnowledgeChunksRetriever falhou: %s", exc)
+            return []
+
+    async def _aget_relevant_documents(
+        self,
+        query: str,
+        *,
+        run_manager: CallbackManagerForRetrieverRun | None = None,
+    ) -> List[Document]:
+        return await asyncio.to_thread(self._get_relevant_documents, query)
+
+
 def _build_retriever(vector_db_url: str) -> BaseRetriever:
-    """Constrói um PGVector retriever que busca em knowledge_chunks."""
-    embeddings = OpenAIEmbeddings(
-        model="text-embedding-3-small",
-        api_key=os.getenv("OPENAI_API_KEY"),
-    )
-    store = PGVector(
-        connection_string=vector_db_url,
-        embedding_function=embeddings,
-        collection_name="knowledge_chunks",
-    )
-    return store.as_retriever(search_kwargs={"k": 8})
+    """Constrói retriever que busca diretamente em knowledge_chunks (pgvector custom)."""
+    return KnowledgeChunksRetriever(connection_string=vector_db_url, top_k=8)
 
 
 def _build_gm_chain(retriever: BaseRetriever) -> RunnableWithMessageHistory:
@@ -239,32 +296,95 @@ class LangchainGMService:
         result = await asyncio.to_thread(chain.invoke, {"seed": seed})
         return result
 
+    @staticmethod
+    def _d20_tier(roll: int) -> str:
+        if roll >= 16:
+            return "SUCESSO CRÍTICO"
+        if roll >= 10:
+            return "SUCESSO NORMAL"
+        if roll >= 5:
+            return "FALHA"
+        return "FALHA CRÍTICA"
+
     async def process_round(
         self,
         session_id: str,
         ordered_actions: list[dict],
+        enemy_context: str = "",
+        scene_context: str = "",
+        loop_context: str = "",
     ) -> list[str]:
         """
         Processa um round completo em ordem de iniciativa.
         Recebe lista de ações ordenadas por d20 e retorna uma resposta do GM por ação ativa.
-        O GM pode incluir [ROLAGEM:] se decidir rolar dado para determinar o outcome.
+        O resultado narrativo é determinado pelo tier do d20 de cada personagem.
+        enemy_context: string com HP atual dos inimigos vivos (injetada pelo combate).
+        scene_context: última narração do GM — estado atual do mundo e posição do grupo.
+        loop_context: instrução de intervenção narrativa quando loop detectado.
         """
-        # Monta bloco de ações para o prompt
+        # Monta bloco de ações com tier explícito para o LLM
         actions_block = "\n".join(
-            f"[{a['initiative_order']}] {a['character_name']} (d20={a['d20_roll']}): {a['action_text']}"
+            f"[{a['initiative_order']}] {a['character_name']} "
+            f"(d20={a['d20_roll']} → {self._d20_tier(a['d20_roll'] or 0)}): {a['action_text']}"
             for a in ordered_actions
         )
+
+        scene_block = ""
+        if scene_context:
+            scene_block = (
+                "\n\n## ESTADO ATUAL DA CENA (narração anterior do GM)\n"
+                "Esta é a situação do grupo ANTES deste round. Use como base de continuidade:\n"
+                f"{scene_context}\n"
+            )
+
+        enemy_block = ""
+        if enemy_context:
+            enemy_block = (
+                "\n\n## ESTADO ATUAL DOS INIMIGOS\n"
+                "Use os HPs abaixo para narrar de forma precisa:\n"
+                f"{enemy_context}\n"
+            )
+
+        # Injeta instrução de intervenção narrativa quando loop detectado
+        loop_block = loop_context if loop_context else ""
 
         prompt = (
             "Você é o Mestre de um RPG de mesa. Um novo turno acaba de acontecer.\n"
             "As ações abaixo foram declaradas pelos jogadores e ordenadas pela rolagem de d20 "
             "(maior = age primeiro):\n\n"
-            f"{actions_block}\n\n"
-            "Para CADA ação, escreva um parágrafo narrando o resultado. "
-            "Seja criativo, dramático e justo.\n"
-            "Se o resultado de uma ação depende de sorte ou habilidade, use a tag "
-            "[ROLAGEM:tipo:1d20+mod] e o sistema rolará automaticamente.\n"
-            "Se a ação é claramente bem-sucedida ou malsucedida, narre diretamente sem rolar.\n"
+            f"{actions_block}"
+            f"{scene_block}"
+            f"{enemy_block}"
+            f"{loop_block}\n\n"
+            "## REGRA FUNDAMENTAL — SEQUENCIALIDADE DO ROUND\n"
+            "As ações acontecem em SEQUÊNCIA, não em paralelo. O personagem com maior d20 age PRIMEIRO "
+            "e o resultado da sua ação ALTERA A CENA para os próximos.\n\n"
+            "⚠️ OBRIGATÓRIO: Ao narrar a ação [2], considere o que aconteceu em [1]. "
+            "Se o personagem [1] escapou, abriu uma porta, ou mudou o ambiente — o personagem [2] "
+            "age nessa NOVA realidade. NUNCA narre [2] como se [1] não tivesse acontecido.\n\n"
+            "## COERÊNCIA DE GRUPO\n"
+            "Os personagens são um grupo que age no mesmo espaço físico. "
+            "Se um personagem deixou uma área de perigo, os outros também estão saindo ou já saíram. "
+            "Ações individuais devem refletir a posição e estado ATUAL do grupo, "
+            "não uma realidade alternativa onde cada um está isolado.\n\n"
+            "## TABELA DE RESULTADO POR D20 — OBRIGATÓRIO\n"
+            "O resultado narrativo de CADA ação é determinado pelo valor do d20 do personagem:\n\n"
+            "- **d20 = 16–20 (Sucesso Crítico):** A ação é executada com maestria. Além de funcionar "
+            "perfeitamente, algo positivo adicional acontece — um aliado é beneficiado, "
+            "o grupo ganha vantagem, o personagem encontra algo inesperado e útil. Narre de forma épica.\n\n"
+            "- **d20 = 10–15 (Sucesso Normal):** A ação funciona exatamente como planejado. "
+            "Narre o resultado de forma direta e satisfatória.\n\n"
+            "- **d20 = 5–9 (Falha):** A ação não tem o efeito desejado neste turno. "
+            "Narre a falha de forma VARIADA — evite repetir 'tropeça', 'cai no chão' ou 'deixa cair' "
+            "se já foram usados neste round. Use alternativas: perde o timing, é distratído por um ruído, "
+            "subestima a distância, hesita no momento errado, o ambiente dificulta o movimento, etc. "
+            "Sem catástrofe — apenas a ação não funcionou desta vez.\n\n"
+            "- **d20 = 1–4 (Falha Crítica):** A ação falha de forma dramática com consequência adicional. "
+            "Mesmo aqui, varie: um aliado é afetado, um recurso é perdido, a posição é comprometida, "
+            "ou a situação piora de forma inesperada. Evite sempre 'espada cai no chão'.\n\n"
+            "IMPORTANTE: Use o d20 indicado após o nome de cada personagem para determinar o resultado. "
+            "NÃO ignore o d20 — ele é a lei.\n\n"
+            "Para CADA ação, escreva um parágrafo narrando o resultado conforme as regras acima. "
             "Separe cada resposta com '---' numa linha sozinha.\n"
             "Responda APENAS as narrações, uma por ação, na mesma ordem."
         )
@@ -302,13 +422,15 @@ class LangchainGMService:
             f"um {companion.get('character_class', 'aventureiro')} {companion.get('race', '')}.\n"
             f"Personalidade: {personality}\n"
             f"Aparência: {appearance}\n\n"
-            f"Contexto atual: {scene_context}\n\n"
-            "Declare em UMA frase curta e direta o que seu personagem faz neste turno. "
-            "Use a primeira pessoa. Seja coerente com sua personalidade e classe. "
-            "Exemplos: 'Ataco o inimigo mais próximo com minha espada.' / "
-            "'Lanço Bola de Fogo no grupo de goblins.' / "
-            "'Curo o aliado ferido com Curar Ferimentos.'\n"
-            "Responda APENAS a declaração de ação, sem explicações."
+            "=== NARRATIVA RECENTE DO MESTRE ===\n"
+            f"{scene_context}\n"
+            "=== FIM DA NARRATIVA ===\n\n"
+            "Com base na narrativa acima, declare em UMA frase curta e direta o que seu personagem "
+            "faz AGORA. Use a primeira pessoa. Seja coerente com sua personalidade, classe e "
+            "com o que está acontecendo na cena — se for exploração, explore; se for diálogo, "
+            "interaja; se for combate, lute. Não invente inimigos ou situações que não existam "
+            "na narrativa.\n"
+            "Responda APENAS a declaração de ação, sem explicações adicionais."
         )
 
         result = await asyncio.to_thread(self._llm.invoke, prompt)

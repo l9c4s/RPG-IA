@@ -180,3 +180,49 @@ async def get_locations(
         return await uc.execute(campaign_id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+
+
+@router.post("/{campaign_id}/sync-players", status_code=status.HTTP_200_OK)
+async def sync_campaign_players(
+    campaign_id: UUID,
+) -> dict:
+    """
+    Backfill: registra (ou re-sincroniza) todos os personagens ativos da campanha
+    como campaign_players. Idempotente — pode ser chamado múltiplas vezes.
+    Útil para campanhas criadas antes da feature de campaign_players ser implementada.
+    """
+    from infrastructure.database.connection import AsyncSessionLocal
+    from infrastructure.repositories.campaign_repository import CampaignRepository as CampRepo
+    from infrastructure.external.image_client import CharacterServiceClient
+
+    try:
+        chars_client = CharacterServiceClient()
+        characters = await chars_client.list_campaign_characters(str(campaign_id))
+
+        registered = 0
+        async with AsyncSessionLocal() as db:
+            repo = CampRepo(db)
+            from uuid import UUID as _UUID
+            for char in characters:
+                char_id = char.get("id")
+                if not char_id:
+                    continue
+                await repo.register_player(
+                    campaign_id=campaign_id,
+                    character_id=_UUID(str(char_id)),
+                    is_ai=char.get("char_type") == "ai_companion",
+                    ai_personality=char.get("personality_traits"),
+                )
+                registered += 1
+            await db.commit()
+
+        return {
+            "campaign_id": str(campaign_id),
+            "registered": registered,
+            "message": f"{registered} personagem(ns) sincronizado(s) em campaign_players.",
+        }
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao sincronizar players: {exc}",
+        )

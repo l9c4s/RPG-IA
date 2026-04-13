@@ -14,6 +14,19 @@
     "defaultMode": "acceptEdits"
   },
   "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"c:/Users/crazy mam/Desktop/RPG-IA/scripts/validate_orm_vs_db.py\"",
+            "timeout": 30,
+            "statusMessage": "Validando ORM vs banco de dados…"
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [

@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from domain.round.entity import Round, RoundAction
 from domain.round.value_objects import RoundStatus
-from infrastructure.database.orm_models import RoundActionORM, SessionRoundORM
+from infrastructure.database.orm_models import DiceRollORM, RoundActionORM, SessionRoundORM
 
 
 class RoundRepository:
@@ -144,6 +144,29 @@ class RoundRepository:
         orm.gm_response = action.gm_response
         orm.gm_rolled_dice = action.gm_rolled_dice
         orm.outcome_roll = action.outcome_roll
+        await self._db.flush()
+
+    # ─── Dice rolls ─────────────────────────────────────────────────────────
+
+    async def save_dice_roll(
+        self,
+        *,
+        session_id: UUID,
+        character_id: UUID | None,
+        roll_type: str,
+        dice_expr: str,
+        result: int,
+        breakdown: dict | None = None,
+    ) -> None:
+        orm = DiceRollORM(
+            session_id=session_id,
+            character_id=character_id,
+            roll_type=roll_type,
+            dice_expr=dice_expr,
+            result=result,
+            breakdown=breakdown,
+        )
+        self._db.add(orm)
         await self._db.flush()
 
     # ─── Helpers ────────────────────────────────────────────────────────────

@@ -72,6 +72,11 @@ def _item_to_dto(i) -> InventoryItemDTO:
         properties=i.properties,
         equipped=i.equipped,
         created_at=i.created_at,
+        stat_bonuses=getattr(i, "stat_bonuses", {}) or {},
+        special_effects=getattr(i, "special_effects", []) or [],
+        rarity=getattr(i, "rarity", "common") or "common",
+        is_starting_item=getattr(i, "is_starting_item", False) or False,
+        description=getattr(i, "description", None),
     )
 
 
@@ -84,7 +89,7 @@ def _ability_to_dto(a) -> AbilityDTO:
         description=a.description,
         spell_level=a.spell_level,
         uses_max=a.uses_max,
-        uses_remaining=a.uses_remaining,
+        uses_current=a.uses_current,
         recharge=a.recharge,
     )
 
@@ -103,6 +108,7 @@ def _character_to_dto(c: Character) -> CharacterDTO:
         char_type=c.char_type,
         backstory=c.backstory,
         appearance=c.appearance,
+        image_url=c.image_url,
         campaign_id=c.campaign_id,
         owner_id=c.owner_id,
         is_alive=c.is_alive,
@@ -158,7 +164,70 @@ class CreateCharacterUseCase:
         character.status.hp_current = initial_hp
 
         saved = await self._repo.save(character)
-        return _character_to_dto(saved)
+
+        # Gera os 6 itens iniciais e as habilidades iniciais via LLM
+        if dto.char_type in ("player", "ai_companion"):
+            await self._generate_starting_inventory(saved.id, dto)
+            await self._generate_starting_abilities(saved.id, dto)
+
+        # Recarrega o personagem com o inventário e habilidades gerados
+        final = await self._repo.get_by_id(saved.id)
+        return _character_to_dto(final or saved)
+
+    async def _generate_starting_inventory(
+        self, character_id: UUID, dto: CreateCharacterDTO
+    ) -> None:
+        """Gera e persiste os 6 itens iniciais via LLM."""
+        import logging
+        logger = logging.getLogger(__name__)
+        try:
+            from infrastructure.inventory_generator import generate_starting_inventory
+
+            raw_items = await generate_starting_inventory(
+                class_=dto.class_,
+                race=dto.race,
+                background=dto.background or "Plebeu",
+                level=dto.level,
+                character_id=character_id,
+                character_name=dto.name,
+            )
+            for item_data in raw_items:
+                item = InventoryItem.create(**item_data)
+                await self._repo.add_inventory_item(item)
+        except Exception as exc:
+            logger.error(
+                "Falha ao gerar inventário inicial para personagem %s: %s",
+                character_id,
+                exc,
+            )
+
+    async def _generate_starting_abilities(
+        self, character_id: UUID, dto: CreateCharacterDTO
+    ) -> None:
+        """Gera e persiste 3-5 habilidades de classe iniciais via LLM."""
+        import logging
+        logger = logging.getLogger(__name__)
+        try:
+            from infrastructure.ability_generator import generate_starting_abilities
+
+            raw_abilities = await generate_starting_abilities(
+                class_=dto.class_,
+                race=dto.race,
+                level=dto.level,
+                character_id=character_id,
+                character_name=dto.name,
+                background=dto.background or "Plebeu",
+            )
+            for ability_data in raw_abilities:
+                from domain.character.entity import Ability
+                ability = Ability.create(**ability_data)
+                await self._repo.add_ability(ability)
+        except Exception as exc:
+            logger.error(
+                "Falha ao gerar habilidades iniciais para personagem %s: %s",
+                character_id,
+                exc,
+            )
 
 
 class GetCharacterUseCase:
@@ -247,6 +316,11 @@ class AddInventoryItemUseCase:
             value_gp=dto.value_gp,
             properties=dto.properties,
             equipped=dto.equipped,
+            stat_bonuses=dto.stat_bonuses,
+            special_effects=dto.special_effects,
+            rarity=dto.rarity,
+            is_starting_item=dto.is_starting_item,
+            description=dto.description,
         )
         saved = await self._repo.add_inventory_item(item)
         return _item_to_dto(saved)

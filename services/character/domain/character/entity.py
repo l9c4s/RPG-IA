@@ -96,6 +96,9 @@ class CharacterAttributes:
     armor_class: int = 10
     initiative: int = 0
     speed: int = 30
+    proficiency: int = 2
+    saving_throws: dict = field(default_factory=dict)
+    skill_profs: list = field(default_factory=list)
 
     @classmethod
     def create_default(cls, character_id: UUID, **overrides: Any) -> "CharacterAttributes":
@@ -114,6 +117,11 @@ class InventoryItem:
     properties: dict[str, Any]
     equipped: bool
     created_at: datetime
+    stat_bonuses: dict[str, Any] = field(default_factory=dict)
+    special_effects: list[dict[str, Any]] = field(default_factory=list)
+    rarity: str = "common"
+    is_starting_item: bool = False
+    description: Optional[str] = None
 
     @classmethod
     def create(
@@ -126,6 +134,11 @@ class InventoryItem:
         value_gp: float = 0.0,
         properties: Optional[dict[str, Any]] = None,
         equipped: bool = False,
+        stat_bonuses: Optional[dict[str, Any]] = None,
+        special_effects: Optional[list[dict[str, Any]]] = None,
+        rarity: str = "common",
+        is_starting_item: bool = False,
+        description: Optional[str] = None,
     ) -> "InventoryItem":
         return cls(
             id=uuid4(),
@@ -138,6 +151,11 @@ class InventoryItem:
             properties=properties or {},
             equipped=equipped,
             created_at=datetime.utcnow(),
+            stat_bonuses=stat_bonuses or {},
+            special_effects=special_effects or [],
+            rarity=rarity,
+            is_starting_item=is_starting_item,
+            description=description,
         )
 
 
@@ -150,7 +168,7 @@ class Ability:
     description: Optional[str]
     spell_level: Optional[int]
     uses_max: Optional[int]
-    uses_remaining: Optional[int]
+    uses_current: Optional[int]
     recharge: Optional[str]
 
     @classmethod
@@ -174,7 +192,7 @@ class Ability:
             description=description,
             spell_level=spell_level,
             uses_max=uses_max,
-            uses_remaining=uses_max,  # initializes to max
+            uses_current=uses_max,  # inicializa com o máximo
             recharge=recharge,
         )
 
@@ -203,6 +221,7 @@ class Character:
     is_alive: bool
     created_at: datetime
     updated_at: datetime
+    image_url: Optional[str] = None
     status: Optional[CharacterStatus] = None
     attributes: Optional[CharacterAttributes] = None
     inventory: list[InventoryItem] = field(default_factory=list)
@@ -221,6 +240,7 @@ class Character:
         char_type: str = CharacterType.PLAYER,
         backstory: Optional[str] = None,
         appearance: Optional[str] = None,
+        image_url: Optional[str] = None,
         campaign_id: Optional[UUID] = None,
         owner_id: Optional[UUID] = None,
     ) -> "Character":
@@ -238,6 +258,7 @@ class Character:
             char_type=char_type,
             backstory=backstory,
             appearance=appearance,
+            image_url=image_url,
             campaign_id=campaign_id,
             owner_id=owner_id,
             is_alive=True,

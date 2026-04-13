@@ -30,6 +30,7 @@ export interface GMRoundResponse {
   roll_results: { expr: string; result: number }[]
   gm_rolled_dice: boolean
   outcome_roll: number | null
+  d20_roll: number | null
 }
 
 export type RoundPhase =
@@ -45,14 +46,24 @@ export interface RoundState {
   phase: RoundPhase
   submittedCount: number
   expectedCount: number
-  myActionSubmitted: boolean
+  /** IDs dos personagens que já submeteram ação neste round */
+  submittedCharacterIds: string[]
   initiative: InitiativeEntry[]
   gmResponses: GMRoundResponse[]
 }
 
+interface MyCharacter {
+  id: string
+  name: string
+}
+
 interface RoundPanelProps {
   round: RoundState
-  characterName: string
+  /** Personagens do usuário logado (≥1 em co-op) */
+  myCharacters: MyCharacter[]
+  /** Índice do personagem ativo no switcher */
+  activeCharacterIdx: number
+  onChangeActiveCharacter: (idx: number) => void
   onSubmitAction: (actionText: string | null, isPass: boolean) => void
   onStartRound: () => void
   isStarting: boolean
@@ -84,13 +95,26 @@ function SubmittedCountBubbles({
   )
 }
 
+function d20TierStyle(roll: number, isPass: boolean): string {
+  if (isPass) return 'bg-slate-700/60 border-slate-600/40 text-slate-400'
+  if (roll >= 16) return 'bg-emerald-900/60 border-emerald-500/60 text-emerald-300'
+  if (roll >= 10) return 'bg-slate-700/60 border-slate-500/60 text-slate-200'
+  if (roll >= 5)  return 'bg-amber-900/60 border-amber-600/60 text-amber-300'
+  return 'bg-red-900/60 border-red-500/60 text-red-300'
+}
+
+function d20TierLabel(roll: number, isPass: boolean): string {
+  if (isPass) return '—'
+  if (roll >= 16) return 'Crítico'
+  if (roll >= 10) return 'Sucesso'
+  if (roll >= 5)  return 'Falha'
+  return 'Falha Crit.'
+}
+
 function InitiativeBoard({ entries }: { entries: InitiativeEntry[] }): React.ReactElement {
   return (
     <div className="space-y-1.5">
       {entries.map((entry) => {
-        const isCrit   = entry.d20_roll === 20
-        const isFumble = entry.d20_roll === 1
-
         return (
           <div
             key={entry.character_name}
@@ -101,20 +125,17 @@ function InitiativeBoard({ entries }: { entries: InitiativeEntry[] }): React.Rea
               {entry.initiative_order}
             </div>
 
-            {/* d20 badge */}
+            {/* d20 badge com tier */}
             <div
               className={`flex-shrink-0 flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold border ${
-                isCrit
-                  ? 'bg-amber-900/60 border-amber-500/60 text-amber-300'
-                  : isFumble
-                  ? 'bg-red-900/60 border-red-500/60 text-red-300'
-                  : entry.is_pass
-                  ? 'bg-slate-700/60 border-slate-600/40 text-slate-400'
-                  : 'bg-slate-700/60 border-slate-600/60 text-slate-200'
+                d20TierStyle(entry.d20_roll, entry.is_pass)
               }`}
             >
               <Dice6 className="w-3 h-3" />
               {entry.d20_roll}
+              <span className="font-normal opacity-80 ml-0.5">
+                {d20TierLabel(entry.d20_roll, entry.is_pass)}
+              </span>
             </div>
 
             {/* Character + action */}
@@ -164,13 +185,23 @@ function GMResponseCard({ resp }: { resp: GMRoundResponse }): React.ReactElement
 
 export default function RoundPanel({
   round,
-  characterName,
+  myCharacters,
+  activeCharacterIdx,
+  onChangeActiveCharacter,
   onSubmitAction,
   onStartRound,
   isStarting,
 }: RoundPanelProps): React.ReactElement {
   const [actionText, setActionText] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  const activeChar = myCharacters[activeCharacterIdx] ?? myCharacters[0]
+  const activeCharSubmitted = activeChar
+    ? round.submittedCharacterIds.includes(activeChar.id)
+    : false
+  const allMyCharsSubmitted = myCharacters.every((c) =>
+    round.submittedCharacterIds.includes(c.id)
+  )
 
   async function handleSubmit(isPass: boolean): Promise<void> {
     if (isSubmitting) return
@@ -229,12 +260,52 @@ export default function RoundPanel({
           />
         </div>
 
-        {round.myActionSubmitted ? (
-          /* Já submeteu — aguardando outros */
+        {/* Switcher de personagem (apenas em co-op com múltiplos personagens) */}
+        {myCharacters.length > 1 && (
+          <div className="flex gap-1">
+            {myCharacters.map((c, idx) => {
+              const submitted = round.submittedCharacterIds.includes(c.id)
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => onChangeActiveCharacter(idx)}
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-semibold border transition-all ${
+                    idx === activeCharacterIdx
+                      ? 'bg-amber-700/30 border-amber-600/50 text-amber-300'
+                      : submitted
+                      ? 'bg-slate-800/40 border-slate-700/30 text-slate-500 cursor-default'
+                      : 'bg-slate-800/60 border-slate-700/40 text-slate-300 hover:border-slate-500'
+                  }`}
+                  disabled={submitted}
+                >
+                  {submitted && <CheckCircle2 className="w-3 h-3 text-green-400 flex-shrink-0" />}
+                  <span className="truncate">{c.name}</span>
+                </button>
+              )
+            })}
+          </div>
+        )}
+
+        {allMyCharsSubmitted ? (
+          /* Todos os personagens submeteram — aguardando outros jogadores */
           <div className="flex items-center gap-2 py-2 px-3 rounded-lg bg-slate-800/60 border border-slate-700/40">
             <Loader2 className="w-4 h-4 text-slate-400 animate-spin" />
             <span className="text-slate-400 text-sm font-serif italic">
-              Ação enviada! Aguardando outros jogadores…
+              {myCharacters.length > 1
+                ? 'Todos os seus personagens agiram! Aguardando outros jogadores…'
+                : 'Ação enviada! Aguardando outros jogadores…'}
+            </span>
+          </div>
+        ) : activeCharSubmitted ? (
+          /* Personagem ativo já submeteu — prompt para trocar */
+          <div className="flex items-center gap-2 py-2 px-3 rounded-lg bg-slate-800/60 border border-slate-700/40">
+            <CheckCircle2 className="w-4 h-4 text-green-400" />
+            <span className="text-slate-400 text-sm font-serif italic">
+              {activeChar?.name} agiu.{' '}
+              {myCharacters.some((c) => !round.submittedCharacterIds.includes(c.id)) && (
+                <span className="text-amber-300">Selecione outro personagem acima.</span>
+              )}
             </span>
           </div>
         ) : (
@@ -242,7 +313,7 @@ export default function RoundPanel({
           <>
             <div>
               <label className="text-slate-400 text-xs mb-1 block">
-                O que <span className="text-amber-300">{characterName}</span> faz?
+                O que <span className="text-amber-300">{activeChar?.name ?? '…'}</span> faz?
               </label>
               <textarea
                 value={actionText}

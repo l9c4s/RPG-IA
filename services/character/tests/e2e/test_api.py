@@ -363,6 +363,53 @@ class TestInventory:
         )
         assert r.status_code == 404
 
+    # ── Novos campos na resposta de inventário ──────────────────────────────────
+
+    async def test_inventory_response_includes_new_fields(self, client, created_character):
+        """Resposta do item deve incluir stat_bonuses, special_effects, rarity, is_starting_item."""
+        cid = created_character["id"]
+        r = await client.post(
+            f"/characters/{cid}/inventory",
+            json={"item_name": "Battle Axe", "item_type": "weapon"},
+        )
+        assert r.status_code == 201
+        data = r.json()
+        assert "stat_bonuses" in data
+        assert "special_effects" in data
+        assert "rarity" in data
+        assert "is_starting_item" in data
+        assert "description" in data
+
+    async def test_inventory_response_stat_bonuses_defaults_empty(self, client, created_character):
+        cid = created_character["id"]
+        r = await client.post(
+            f"/characters/{cid}/inventory",
+            json={"item_name": "Basic Sword"},
+        )
+        data = r.json()
+        assert data["stat_bonuses"] == {}
+        assert data["special_effects"] == []
+        assert data["rarity"] == "common"
+        assert data["is_starting_item"] is False
+        assert data["description"] is None
+
+    async def test_character_inventory_list_includes_new_fields(self, client, created_character):
+        """Lista de inventário no GET /characters/{id} deve incluir os novos campos."""
+        cid = created_character["id"]
+        await client.post(
+            f"/characters/{cid}/inventory",
+            json={"item_name": "Shield", "item_type": "armor"},
+        )
+        r = await client.get(f"/characters/{cid}")
+        assert r.status_code == 200
+        inventory = r.json()["inventory"]
+        assert isinstance(inventory, list)
+        if inventory:
+            item = inventory[0]
+            assert "stat_bonuses" in item
+            assert "rarity" in item
+            assert "is_starting_item" in item
+
 
 # ---------------------------------------------------------------------------
 # POST /characters/{id}/abilities
@@ -379,7 +426,7 @@ class TestAbilities:
         assert r.status_code == 201
         data = r.json()
         assert data["ability_name"] == "Second Wind"
-        assert data["uses_remaining"] == 1
+        assert data["uses_current"] == 1
 
     async def test_add_spell_with_level(self, client, created_character):
         cid = created_character["id"]

@@ -32,6 +32,7 @@ class CharacterRepository:
     # -----------------------------------------------------------------------
 
     def _status_to_domain(self, orm: CharacterStatusDB) -> CharacterStatus:
+        ds = orm.death_saves or {}
         return CharacterStatus(
             id=orm.id,
             character_id=orm.character_id,
@@ -41,8 +42,8 @@ class CharacterRepository:
             conditions=orm.conditions or [],
             spell_slots=orm.spell_slots or {},
             exhaustion=orm.exhaustion,
-            death_saves_success=orm.death_saves_success,
-            death_saves_failure=orm.death_saves_failure,
+            death_saves_success=ds.get("successes", 0),
+            death_saves_failure=ds.get("failures", 0),
             updated_at=orm.updated_at or datetime.utcnow(),
         )
 
@@ -59,6 +60,9 @@ class CharacterRepository:
             armor_class=orm.armor_class,
             initiative=orm.initiative,
             speed=orm.speed,
+            proficiency=orm.proficiency,
+            saving_throws=orm.saving_throws or {},
+            skill_profs=orm.skill_profs or [],
         )
 
     def _item_to_domain(self, orm: InventoryItemDB) -> InventoryItem:
@@ -73,6 +77,11 @@ class CharacterRepository:
             properties=orm.properties or {},
             equipped=orm.equipped,
             created_at=orm.created_at or datetime.utcnow(),
+            stat_bonuses=orm.stat_bonuses or {},
+            special_effects=orm.special_effects or [],
+            rarity=orm.rarity or "common",
+            is_starting_item=orm.is_starting_item or False,
+            description=orm.description,
         )
 
     def _ability_to_domain(self, orm: AbilityDB) -> Ability:
@@ -84,7 +93,7 @@ class CharacterRepository:
             description=orm.description,
             spell_level=orm.spell_level,
             uses_max=orm.uses_max,
-            uses_remaining=orm.uses_remaining,
+            uses_current=orm.uses_current,
             recharge=orm.recharge,
         )
 
@@ -102,6 +111,7 @@ class CharacterRepository:
             char_type=orm.char_type,
             backstory=orm.backstory,
             appearance=orm.appearance,
+            image_url=orm.image_url,
             campaign_id=orm.campaign_id,
             owner_id=orm.owner_id,
             is_alive=orm.is_alive,
@@ -129,6 +139,7 @@ class CharacterRepository:
         orm.char_type = character.char_type
         orm.backstory = character.backstory
         orm.appearance = character.appearance
+        orm.image_url = character.image_url
         orm.campaign_id = character.campaign_id
         orm.owner_id = character.owner_id
         orm.is_alive = character.is_alive
@@ -140,8 +151,7 @@ class CharacterRepository:
         orm.conditions = status.conditions
         orm.spell_slots = status.spell_slots
         orm.exhaustion = status.exhaustion
-        orm.death_saves_success = status.death_saves_success
-        orm.death_saves_failure = status.death_saves_failure
+        orm.death_saves = {"successes": status.death_saves_success, "failures": status.death_saves_failure}
 
     def _apply_attrs_to_orm(
         self, attrs: CharacterAttributes, orm: CharacterAttributesDB
@@ -155,6 +165,9 @@ class CharacterRepository:
         orm.armor_class = attrs.armor_class
         orm.initiative = attrs.initiative
         orm.speed = attrs.speed
+        orm.proficiency = attrs.proficiency
+        orm.saving_throws = attrs.saving_throws
+        orm.skill_profs = attrs.skill_profs
 
     # -----------------------------------------------------------------------
     # Queries
@@ -299,6 +312,11 @@ class CharacterRepository:
             value_gp=item.value_gp,
             properties=item.properties,
             equipped=item.equipped,
+            stat_bonuses=item.stat_bonuses,
+            special_effects=item.special_effects,
+            rarity=item.rarity,
+            is_starting_item=item.is_starting_item,
+            description=item.description,
         )
         self._session.add(orm)
         await self._session.flush()
@@ -323,7 +341,7 @@ class CharacterRepository:
             description=ability.description,
             spell_level=ability.spell_level,
             uses_max=ability.uses_max,
-            uses_remaining=ability.uses_remaining,
+            uses_current=ability.uses_current,
             recharge=ability.recharge,
         )
         self._session.add(orm)

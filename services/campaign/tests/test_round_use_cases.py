@@ -14,6 +14,7 @@ from uuid import uuid4, UUID
 
 from application.round.dtos import StartRoundDTO, SubmitActionDTO
 from application.round.use_cases import (
+    ProcessGMTurnUseCase,
     ResolveRoundUseCase,
     StartRoundUseCase,
     SubmitActionUseCase,
@@ -372,3 +373,197 @@ class TestResolveRoundUseCase:
 
         rolls = [e.d20_roll for e in result.initiative_board]
         assert rolls == sorted(rolls, reverse=True)
+
+
+# ─── ProcessGMTurnUseCase — dice roll saving ──────────────────────────────────
+
+def make_gm_processing_round(session_id, d20_rolls=(14, 7)):
+    """Cria round em GM_PROCESSING com ações que já têm d20 rolado."""
+    r = Round.create(session_id=session_id, round_number=1)
+    r.status = RoundStatus.GM_PROCESSING
+    for i, roll in enumerate(d20_rolls):
+        char_id = uuid4()
+        action = RoundAction.create(
+            round_id=r.id,
+            session_id=session_id,
+            character_name=f"Player{i}",
+            is_ai=False,
+            is_pass=False,
+            character_id=char_id,
+            action_text=f"Ataco o inimigo {i}",
+        )
+        action.d20_roll = roll
+        action.initiative_order = i + 1
+        r.actions.append(action)
+    return r
+
+
+def make_process_gm_uc(round_: Round, gm_responses: list[str], save_dice_roll_side_effect=None):
+    """Monta ProcessGMTurnUseCase com todos os mocks necessários."""
+    round_repo = make_round_repo(round_by_id=round_)
+    round_repo.save_dice_roll = AsyncMock(
+        side_effect=save_dice_roll_side_effect
+    )
+
+    knowledge = AsyncMock()
+    knowledge.check_gate = AsyncMock(return_value=True)
+
+    gm = AsyncMock()
+    gm.process_round = AsyncMock(return_value=gm_responses)
+
+    message_repo = AsyncMock()
+    message_repo.save = AsyncMock()
+
+    return ProcessGMTurnUseCase(
+        round_repo=round_repo,
+        message_repo=message_repo,
+        gm_service=gm,
+        knowledge_retriever=knowledge,
+        ws_broadcast_fn=AsyncMock(),
+        character_client=None,
+    ), round_repo
+
+
+class TestProcessGMTurnUseCaseDiceRolls:
+    @pytest.mark.asyncio
+    async def test_saves_initiative_d20_for_each_active_action(self):
+        session_id = uuid4()
+        round_ = make_gm_processing_round(session_id, d20_rolls=(18, 6))
+        uc, repo = make_process_gm_uc(round_, gm_responses=["Acerta!", "Falha!"])
+
+        await uc.execute(round_.id)
+
+        # save_dice_roll deve ter sido chamado pelo menos 2x (1 por ação — d20 iniciativa)
+        initiative_calls = [
+            c for c in repo.save_dice_roll.call_args_list
+            if c.kwargs.get("roll_type") == "initiative"
+        ]
+        assert len(initiative_calls) == 2
+
+    @pytest.mark.asyncio
+    async def test_initiative_d20_saved_with_correct_expr_and_result(self):
+        session_id = uuid4()
+        round_ = make_gm_processing_round(session_id, d20_rolls=(18,))
+        uc, repo = make_process_gm_uc(round_, gm_responses=["Sucesso crítico!"])
+
+        await uc.execute(round_.id)
+
+        call = next(
+            c for c in repo.save_dice_roll.call_args_list
+            if c.kwargs.get("roll_type") == "initiative"
+        )
+        assert call.kwargs["dice_expr"] == "1d20"
+        assert call.kwargs["result"] == 18
+
+    @pytest.mark.asyncio
+    async def test_initiative_d20_breakdown_contains_tier(self):
+        session_id = uuid4()
+        round_ = make_gm_processing_round(session_id, d20_rolls=(4,))
+        uc, repo = make_process_gm_uc(round_, gm_responses=["Falha catastrófica!"])
+
+        await uc.execute(round_.id)
+
+        call = next(
+            c for c in repo.save_dice_roll.call_args_list
+            if c.kwargs.get("roll_type") == "initiative"
+        )
+        assert call.kwargs["breakdown"]["tier"] == "FALHA CRÍTICA"
+
+    @pytest.mark.asyncio
+    async def test_saves_gm_roll_when_rolagem_tag_present(self):
+        session_id = uuid4()
+        round_ = make_gm_processing_round(session_id, d20_rolls=(12,))
+        # GM retorna resposta com tag [ROLAGEM:1d20+5] que será parseada
+        uc, repo = make_process_gm_uc(
+            round_,
+            gm_responses=["O goblin tenta resistir [ROLAGEM:1d20+3]. Ele falha!"],
+        )
+
+        await uc.execute(round_.id)
+
+        action_calls = [
+            c for c in repo.save_dice_roll.call_args_list
+            if c.kwargs.get("roll_type") == "action"
+        ]
+        assert len(action_calls) == 1
+        assert action_calls[0].kwargs["dice_expr"] == "1d20+3"
+
+    @pytest.mark.asyncio
+    async def test_no_action_roll_saved_when_no_rolagem_tag(self):
+        session_id = uuid4()
+        round_ = make_gm_processing_round(session_id, d20_rolls=(15,))
+        uc, repo = make_process_gm_uc(
+            round_,
+            gm_responses=["O personagem age com sucesso, sem dados necessários."],
+        )
+
+        await uc.execute(round_.id)
+
+        action_calls = [
+            c for c in repo.save_dice_roll.call_args_list
+            if c.kwargs.get("roll_type") == "action"
+        ]
+        assert len(action_calls) == 0
+
+    @pytest.mark.asyncio
+    async def test_dice_roll_save_failure_does_not_crash_round(self):
+        session_id = uuid4()
+        round_ = make_gm_processing_round(session_id, d20_rolls=(10,))
+        uc, repo = make_process_gm_uc(
+            round_,
+            gm_responses=["Sucesso normal."],
+            save_dice_roll_side_effect=Exception("DB unavailable"),
+        )
+
+        # Não deve lançar exceção — erros de save são engolidos
+        results = await uc.execute(round_.id)
+        assert len(results) == 1
+
+    @pytest.mark.asyncio
+    async def test_pass_actions_not_included_in_initiative_saves(self):
+        """Ações is_pass=True ficam fora de active_actions — não geram save de d20."""
+        session_id = uuid4()
+        r = Round.create(session_id=session_id, round_number=1)
+        r.status = RoundStatus.GM_PROCESSING
+
+        pass_action = RoundAction.create(
+            round_id=r.id, session_id=session_id,
+            character_name="Garet", is_ai=False, is_pass=True,
+        )
+        pass_action.d20_roll = 0
+        pass_action.initiative_order = 2
+        r.actions.append(pass_action)
+
+        uc, repo = make_process_gm_uc(r, gm_responses=[])
+
+        await uc.execute(r.id)
+
+        # Nenhum save de d20 pois não há active_actions
+        assert repo.save_dice_roll.call_count == 0
+
+    @pytest.mark.asyncio
+    async def test_character_id_passed_to_dice_roll_save(self):
+        session_id = uuid4()
+        char_id = uuid4()
+        r = Round.create(session_id=session_id, round_number=1)
+        r.status = RoundStatus.GM_PROCESSING
+
+        action = RoundAction.create(
+            round_id=r.id, session_id=session_id,
+            character_name="Elara", is_ai=False, is_pass=False,
+            character_id=char_id, action_text="Lança feitiço",
+        )
+        action.d20_roll = 19
+        action.initiative_order = 1
+        r.actions.append(action)
+
+        uc, repo = make_process_gm_uc(r, gm_responses=["Crítico!"])
+
+        await uc.execute(r.id)
+
+        initiative_call = next(
+            c for c in repo.save_dice_roll.call_args_list
+            if c.kwargs.get("roll_type") == "initiative"
+        )
+        assert initiative_call.kwargs["character_id"] == char_id
+        assert initiative_call.kwargs["session_id"] == session_id

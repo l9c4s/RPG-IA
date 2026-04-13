@@ -271,3 +271,53 @@ class TestRound:
         assert len(d["actions"]) == 2
         assert d["round_number"] == 1
         assert d["status"] == "collecting"
+
+
+# ─── _d20_tier ────────────────────────────────────────────────────────────────
+
+class TestD20Tier:
+    """Testa a função pura _d20_tier() importada do use case."""
+
+    @pytest.fixture(autouse=True)
+    def import_tier(self):
+        from application.round.use_cases import _d20_tier
+        self.tier = _d20_tier
+
+    def test_roll_20_is_critical_success(self):
+        assert self.tier(20) == "SUCESSO CRÍTICO"
+
+    def test_roll_16_is_critical_success(self):
+        assert self.tier(16) == "SUCESSO CRÍTICO"
+
+    def test_roll_15_is_normal_success(self):
+        assert self.tier(15) == "SUCESSO NORMAL"
+
+    def test_roll_10_is_normal_success(self):
+        assert self.tier(10) == "SUCESSO NORMAL"
+
+    def test_roll_9_is_failure(self):
+        assert self.tier(9) == "FALHA"
+
+    def test_roll_5_is_failure(self):
+        assert self.tier(5) == "FALHA"
+
+    def test_roll_4_is_critical_failure(self):
+        assert self.tier(4) == "FALHA CRÍTICA"
+
+    def test_roll_1_is_critical_failure(self):
+        assert self.tier(1) == "FALHA CRÍTICA"
+
+    def test_boundary_15_vs_16(self):
+        assert self.tier(15) != self.tier(16)
+        assert self.tier(16) == "SUCESSO CRÍTICO"
+        assert self.tier(15) == "SUCESSO NORMAL"
+
+    def test_boundary_9_vs_10(self):
+        assert self.tier(9) != self.tier(10)
+        assert self.tier(10) == "SUCESSO NORMAL"
+        assert self.tier(9) == "FALHA"
+
+    def test_boundary_4_vs_5(self):
+        assert self.tier(4) != self.tier(5)
+        assert self.tier(5) == "FALHA"
+        assert self.tier(4) == "FALHA CRÍTICA"

@@ -66,6 +66,7 @@ def _map_character_dto_to_response(dto) -> CharacterResponse:
         char_type=dto.char_type,
         backstory=dto.backstory,
         appearance=dto.appearance,
+        image_url=dto.image_url,
         campaign_id=dto.campaign_id,
         owner_id=dto.owner_id,
         is_alive=dto.is_alive,

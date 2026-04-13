@@ -8,8 +8,9 @@ from unittest.mock import AsyncMock, MagicMock
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from database import Base, get_db
-from main import app
+from infrastructure.database.connection import get_db
+from infrastructure.database.orm_models import Base
+from presentation.main import app
 
 TEST_DB_URL = (
     os.getenv(

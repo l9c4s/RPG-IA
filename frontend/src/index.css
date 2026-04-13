@@ -382,7 +382,10 @@
   }
 
   .chat-wrap {
-    @apply flex-1 overflow-y-auto py-4 space-y-4 min-h-0;
+    @apply flex-1 overflow-y-auto py-4 min-h-0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
   }
 
   .msg-author {

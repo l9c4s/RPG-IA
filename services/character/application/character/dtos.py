@@ -78,6 +78,11 @@ class AddInventoryItemDTO:
     value_gp: float = 0.0
     properties: dict[str, Any] = field(default_factory=dict)
     equipped: bool = False
+    stat_bonuses: dict[str, Any] = field(default_factory=dict)
+    special_effects: list[dict[str, Any]] = field(default_factory=list)
+    rarity: str = "common"
+    is_starting_item: bool = False
+    description: Optional[str] = None
 
 
 @dataclass
@@ -138,6 +143,11 @@ class InventoryItemDTO:
     properties: dict[str, Any]
     equipped: bool
     created_at: datetime
+    stat_bonuses: dict[str, Any] = field(default_factory=dict)
+    special_effects: list[dict[str, Any]] = field(default_factory=list)
+    rarity: str = "common"
+    is_starting_item: bool = False
+    description: Optional[str] = None
 
 
 @dataclass
@@ -149,7 +159,7 @@ class AbilityDTO:
     description: Optional[str]
     spell_level: Optional[int]
     uses_max: Optional[int]
-    uses_remaining: Optional[int]
+    uses_current: Optional[int]
     recharge: Optional[str]
 
 
@@ -167,6 +177,7 @@ class CharacterDTO:
     char_type: str
     backstory: Optional[str]
     appearance: Optional[str]
+    image_url: Optional[str]
     campaign_id: Optional[UUID]
     owner_id: Optional[UUID]
     is_alive: bool

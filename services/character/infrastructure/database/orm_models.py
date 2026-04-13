@@ -23,9 +23,10 @@ class CharacterDB(Base):
     proficiency_bonus: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
     background: Mapped[str | None] = mapped_column(String(200), nullable=True)
     alignment: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    char_type: Mapped[str] = mapped_column(String(20), nullable=False, default="player")
+    char_type: Mapped[str] = mapped_column(String(20), nullable=False, default="pc")
     backstory: Mapped[str | None] = mapped_column(Text, nullable=True)
     appearance: Mapped[str | None] = mapped_column(Text, nullable=True)
+    image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     campaign_id: Mapped[UUID | None] = mapped_column(nullable=True)
     owner_id: Mapped[UUID | None] = mapped_column(nullable=True)
     is_alive: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
@@ -63,8 +64,8 @@ class CharacterStatusDB(Base):
     conditions: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     spell_slots: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     exhaustion: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    death_saves_success: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    death_saves_failure: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Banco usa JSONB: {"successes": 0, "failures": 0}
+    death_saves: Mapped[dict] = mapped_column(JSON, nullable=False, default=lambda: {"successes": 0, "failures": 0})
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
@@ -88,6 +89,9 @@ class CharacterAttributesDB(Base):
     armor_class: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
     initiative: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     speed: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
+    proficiency: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
+    saving_throws: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    skill_profs: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
 
     character: Mapped["CharacterDB"] = relationship(
         "CharacterDB", back_populates="attributes"
@@ -108,6 +112,24 @@ class InventoryItemDB(Base):
     value_gp: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     properties: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     equipped: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    # ─── Campos de stats e raridade (Sprint 2 — Sistema de Combate) ──────────
+    stat_bonuses: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    # ex: {"strength":2,"armor_class":1,"attack_bonus":1,"damage_bonus":2,"max_hp":5}
+
+    special_effects: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    # ex: [{"trigger":"on_hit","effect":"1d6 fire damage"},
+    #       {"trigger":"on_equip","effect":"advantage on stealth checks"}]
+
+    rarity: Mapped[str] = mapped_column(String(20), nullable=False, default="common")
+    # common | uncommon | rare | very_rare | legendary
+
+    is_starting_item: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # True para os 6 itens gerados na criação do personagem
+
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Descrição narrativa do item (gerada pelo LLM)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -116,7 +138,7 @@ class InventoryItemDB(Base):
 
 
 class AbilityDB(Base):
-    __tablename__ = "abilities"
+    __tablename__ = "character_abilities"
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     character_id: Mapped[UUID] = mapped_column(
@@ -127,7 +149,7 @@ class AbilityDB(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     spell_level: Mapped[int | None] = mapped_column(Integer, nullable=True)
     uses_max: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    uses_remaining: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    uses_current: Mapped[int | None] = mapped_column(Integer, nullable=True)
     recharge: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     character: Mapped["CharacterDB"] = relationship("CharacterDB", back_populates="abilities")

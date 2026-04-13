@@ -169,6 +169,11 @@ class InventoryItemResponse(BaseModel):
     properties: dict[str, Any]
     equipped: bool
     created_at: datetime
+    stat_bonuses: dict[str, Any] = Field(default_factory=dict)
+    special_effects: list[dict[str, Any]] = Field(default_factory=list)
+    rarity: str = "common"
+    is_starting_item: bool = False
+    description: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
@@ -181,7 +186,7 @@ class AbilityResponse(BaseModel):
     description: Optional[str]
     spell_level: Optional[int]
     uses_max: Optional[int]
-    uses_remaining: Optional[int]
+    uses_current: Optional[int]
     recharge: Optional[str]
 
     model_config = {"from_attributes": True}
@@ -200,6 +205,7 @@ class CharacterResponse(BaseModel):
     char_type: str
     backstory: Optional[str]
     appearance: Optional[str]
+    image_url: Optional[str] = None
     campaign_id: Optional[UUID]
     owner_id: Optional[UUID]
     is_alive: bool

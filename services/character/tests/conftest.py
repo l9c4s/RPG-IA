@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 # Make service root importable from any test subdirectory
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from unittest.mock import AsyncMock, patch
+
 from domain.character.entity import Character, CharacterAttributes
 from infrastructure.database.connection import get_db
 from infrastructure.database.orm_models import Base
@@ -93,7 +95,7 @@ async def db_session():
 
 @pytest_asyncio.fixture(scope="function")
 async def client(db_session):
-    """Full ASGI client with DB override — used for E2E tests."""
+    """Full ASGI client with DB override + inventory LLM mocked — used for E2E tests."""
 
     async def override_get_db():
         yield db_session
@@ -101,8 +103,13 @@ async def client(db_session):
     app = create_app()
     app.dependency_overrides[get_db] = override_get_db
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        yield ac
+    # Garante que o E2E não chame a OpenAI para gerar inventário
+    with patch(
+        "infrastructure.inventory_generator.generate_starting_inventory",
+        new=AsyncMock(return_value=[]),
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            yield ac
 
     app.dependency_overrides.clear()
 

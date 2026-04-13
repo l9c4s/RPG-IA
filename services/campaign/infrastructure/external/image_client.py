@@ -86,3 +86,63 @@ class CharacterServiceClient:
             )
             resp.raise_for_status()
             return resp.json()
+
+    async def apply_state_update(
+        self, character_id: str, field: str, value: str
+    ) -> None:
+        """
+        Aplica uma mudança de estado [ESTADO:campo=valor] a um personagem.
+        Suporta: hp_current (absoluto), hp (delta +/-), condition, exhaustion.
+        Falhas são logadas mas nunca propagadas — nunca bloqueiam o round.
+        """
+        try:
+            field = field.strip().lower()
+            value = value.strip()
+            payload: dict | None = None
+
+            # hp como delta (+5 / -3) — busca HP atual primeiro
+            if field == "hp":
+                try:
+                    delta = int(value)
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        r = await client.get(
+                            f"{CHARACTER_SERVICE_URL}/characters/{character_id}"
+                        )
+                        if r.status_code == 200:
+                            status_data = (r.json().get("status") or {})
+                            current_hp = status_data.get("hp_current", 0)
+                            payload = {"hp_current": max(0, current_hp + delta)}
+                except (ValueError, Exception):
+                    pass
+
+            # hp_current absoluto
+            elif field == "hp_current":
+                try:
+                    payload = {"hp_current": int(value)}
+                except ValueError:
+                    pass
+
+            # condition
+            elif field in ("condition", "conditions"):
+                if value.lower() in ("none", "clear", ""):
+                    payload = {"conditions": []}
+                else:
+                    payload = {"conditions": [value]}
+
+            # exhaustion
+            elif field == "exhaustion":
+                try:
+                    payload = {"exhaustion": int(value)}
+                except ValueError:
+                    pass
+
+            if payload:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    await client.patch(
+                        f"{CHARACTER_SERVICE_URL}/characters/{character_id}/status",
+                        json=payload,
+                    )
+        except Exception as exc:
+            logger.warning(
+                "Falha ao aplicar [ESTADO:%s=%s] em %s: %s", field, value, character_id, exc
+            )

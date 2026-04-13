@@ -3,14 +3,25 @@ Implementação concreta do ICampaignRepository usando SQLAlchemy + asyncpg.
 Converte entre ORM (CampaignORM) e entidade de domínio (Campaign).
 """
 
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import delete as sa_delete, select as sa_select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from domain.campaign.entity import Campaign
 from domain.campaign.value_objects import CampaignStatus, Difficulty, InitStatus
-from infrastructure.database.orm_models import CampaignORM, SessionMessageORM, SessionORM
+from infrastructure.database.orm_models import (
+    CampaignORM,
+    CampaignPlayerORM,
+    CampaignSnapshotORM,
+    CampaignStateORM,
+    GmMemoryORM,
+    LocationORM,
+    NpcORM,
+    SessionMessageORM,
+    SessionORM,
+)
 
 
 class CampaignRepository:
@@ -107,4 +118,155 @@ class CampaignRepository:
         if orm:
             await self._db.delete(orm)
 
+        await self._db.flush()
+
+    # ------------------------------------------------------------------
+    # GM Memory
+    # ------------------------------------------------------------------
+
+    async def save_gm_memory(
+        self,
+        *,
+        campaign_id: UUID,
+        content: str,
+        memory_type: str = "narrative",
+        importance: int = 5,
+    ) -> None:
+        orm = GmMemoryORM(
+            campaign_id=campaign_id,
+            content=content,
+            memory_type=memory_type,
+            importance=importance,
+        )
+        self._db.add(orm)
+        await self._db.flush()
+
+    # ------------------------------------------------------------------
+    # Campaign State (upsert)
+    # ------------------------------------------------------------------
+
+    async def upsert_campaign_state(
+        self,
+        *,
+        campaign_id: UUID,
+        current_scene: str | None = None,
+        current_location: str | None = None,
+        world_state: dict | None = None,
+    ) -> None:
+        stmt = (
+            pg_insert(CampaignStateORM)
+            .values(
+                id=uuid4(),
+                campaign_id=campaign_id,
+                current_scene=current_scene,
+                current_location=current_location,
+                world_state=world_state or {},
+                active_quests=[],
+                completed_quests=[],
+                npc_states={},
+            )
+            .on_conflict_do_update(
+                index_elements=["campaign_id"],
+                set_={
+                    "current_scene": current_scene,
+                    "current_location": current_location,
+                    "world_state": world_state or {},
+                },
+            )
+        )
+        await self._db.execute(stmt)
+        await self._db.flush()
+
+    # ------------------------------------------------------------------
+    # Campaign Snapshot
+    # ------------------------------------------------------------------
+
+    async def save_snapshot(
+        self,
+        *,
+        campaign_id: UUID,
+        session_id: UUID,
+        state_data: dict,
+    ) -> None:
+        orm = CampaignSnapshotORM(
+            campaign_id=campaign_id,
+            session_id=session_id,
+            state_data=state_data,
+        )
+        self._db.add(orm)
+        await self._db.flush()
+
+    # ------------------------------------------------------------------
+    # NPCs
+    # ------------------------------------------------------------------
+
+    async def save_npc(
+        self,
+        *,
+        campaign_id: UUID,
+        name: str,
+        description: str | None = None,
+    ) -> None:
+        orm = NpcORM(
+            campaign_id=campaign_id,
+            name=name,
+            description=description,
+        )
+        self._db.add(orm)
+        await self._db.flush()
+
+    # ------------------------------------------------------------------
+    # Locations
+    # ------------------------------------------------------------------
+
+    async def save_location(
+        self,
+        *,
+        campaign_id: UUID,
+        name: str,
+        description: str | None = None,
+        map_url: str | None = None,
+        properties: dict | None = None,
+    ) -> None:
+        orm = LocationORM(
+            campaign_id=campaign_id,
+            name=name,
+            description=description,
+            map_url=map_url,
+            properties=properties or {},
+        )
+        self._db.add(orm)
+        await self._db.flush()
+
+    # ------------------------------------------------------------------
+    # Campaign Players
+    # ------------------------------------------------------------------
+
+    async def register_player(
+        self,
+        *,
+        campaign_id: UUID,
+        character_id: UUID,
+        user_id: UUID | None = None,
+        is_ai: bool = False,
+        ai_personality: dict | None = None,
+    ) -> None:
+        """Registra um jogador na campanha. Ignora duplicata (mesmo character_id)."""
+        existing = await self._db.execute(
+            sa_select(CampaignPlayerORM).where(
+                CampaignPlayerORM.campaign_id == campaign_id,
+                CampaignPlayerORM.character_id == character_id,
+            )
+        )
+        if existing.scalar_one_or_none() is not None:
+            return
+
+        orm = CampaignPlayerORM(
+            campaign_id=campaign_id,
+            user_id=user_id,
+            character_id=character_id,
+            is_ai=is_ai,
+            ai_personality=ai_personality,
+        )
+        self._db.add(orm)
         await self._db.flush()
