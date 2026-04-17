@@ -44,10 +44,7 @@
       "Bash(node -e \"const f = require\\(''fs''\\).readFileSync\\(''c:/Users/crazy mam/Desktop/RPG-IA/.claude/settings.json'',''utf8''\\); const j = JSON.parse\\(f\\); console.log\\(JSON.stringify\\(j.hooks.Stop[0].hooks[0].type\\), j.hooks.Stop[0].hooks[0].timeout\\);\")",
       "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\({k:d.get\\(k,{}\\) for k in [''''scripts'''',''''dependencies'''',''''devDependencies'''']}, indent=2\\)\\)\")",
       "Bash(docker compose exec -T character_service sh -c \"python -c \"\":*)",
-      "Bash(pip install:*)",
-      "Bash(mkdir -p \"c:/Users/crazy mam/Desktop/RPG-IA/services/gateway/infrastructure/database\")",
-      "Bash(mkdir -p \"c:/Users/crazy mam/Desktop/RPG-IA/services/gateway/infrastructure/repositories\")",
-      "Bash(mkdir -p \"c:/Users/crazy mam/Desktop/RPG-IA/services/gateway/infrastructure/auth\")"
+      "Bash(pip install:*)"
     ]
   }
 }
